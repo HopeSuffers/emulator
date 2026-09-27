@@ -4886,8 +4886,11 @@ bool GMainWindow::ExtractZipToDirectory(const std::filesystem::path& zip_path,
     archive_read_support_format_zip(a);
     archive_read_support_filter_all(a);
 
-    // Configure archive writer
-    archive_write_disk_set_options(ext, ARCHIVE_EXTRACT_TIME | ARCHIVE_EXTRACT_PERM);
+    // Configure archive writer. SECURE_NOABSOLUTEPATHS is intentionally omitted:
+    // destinations are rewritten to absolute paths under extract_path below.
+    archive_write_disk_set_options(ext, ARCHIVE_EXTRACT_TIME | ARCHIVE_EXTRACT_PERM |
+                                            ARCHIVE_EXTRACT_SECURE_NODOTDOT |
+                                            ARCHIVE_EXTRACT_SECURE_SYMLINKS);
     archive_write_disk_set_standard_lookup(ext);
 
 #ifdef _WIN32
@@ -4906,18 +4909,45 @@ bool GMainWindow::ExtractZipToDirectory(const std::filesystem::path& zip_path,
     // Create extraction directory
     std::filesystem::create_directories(extract_path);
 
+    const auto is_safe_archive_relative = [](const std::filesystem::path& relative_path) {
+        if (relative_path.empty() || relative_path.is_absolute()) {
+            return false;
+        }
+        for (const auto& component : relative_path) {
+            if (component == "..") {
+                return false;
+            }
+        }
+        return true;
+    };
+
     // Extract files
+    bool rejected_entry = false;
     while (archive_read_next_header(a, &entry) == ARCHIVE_OK) {
-        // Set the extraction path
 #ifdef _WIN32
         const wchar_t* entry_name = archive_entry_pathname_w(entry);
-        const std::filesystem::path entry_path =
-            entry_name != nullptr ? extract_path / entry_name
-                                  : extract_path / Common::FS::PathFromUTF8(archive_entry_pathname(entry));
+        const char* entry_name_narrow = archive_entry_pathname(entry);
+        const std::filesystem::path relative_path =
+            entry_name != nullptr
+                ? std::filesystem::path{entry_name}
+                : Common::FS::PathFromUTF8(entry_name_narrow != nullptr ? entry_name_narrow : "");
+#else
+        const char* entry_name_narrow = archive_entry_pathname(entry);
+        const std::filesystem::path relative_path =
+            Common::FS::PathFromUTF8(entry_name_narrow != nullptr ? entry_name_narrow : "");
+#endif
+        if (!is_safe_archive_relative(relative_path)) {
+            LOG_ERROR(Frontend, "Rejected unsafe path in firmware ZIP: {}",
+                      Common::FS::PathToUTF8String(relative_path));
+            archive_read_data_skip(a);
+            rejected_entry = true;
+            break;
+        }
+
+        const std::filesystem::path entry_path = extract_path / relative_path;
+#ifdef _WIN32
         archive_entry_copy_pathname_w(entry, entry_path.c_str());
 #else
-        std::filesystem::path entry_path =
-            extract_path / Common::FS::PathFromUTF8(archive_entry_pathname(entry));
         const auto entry_utf8 = Common::FS::PathToUTF8String(entry_path);
         archive_entry_set_pathname(entry, entry_utf8.c_str());
 #endif
@@ -4944,7 +4974,7 @@ bool GMainWindow::ExtractZipToDirectory(const std::filesystem::path& zip_path,
 
     archive_read_free(a);
     archive_write_free(ext);
-    return true;
+    return !rejected_entry;
 #else
 #ifdef _WIN32
     // In-process fallback. std::system() opens a console and mangles non-ASCII
