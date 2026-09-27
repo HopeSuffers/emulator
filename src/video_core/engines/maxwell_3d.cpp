@@ -13,6 +13,7 @@
 #include "video_core/dirty_flags.h"
 #include "video_core/engines/draw_manager.h"
 #include "video_core/engines/maxwell_3d.h"
+#include "video_core/engines/zero_kai_workaround.h"
 #include "video_core/gpu.h"
 #include "video_core/memory_manager.h"
 #include "video_core/rasterizer_interface.h"
@@ -307,7 +308,38 @@ void Maxwell3D::ConsumeSinkImpl() {
 }
 
 void Maxwell3D::ProcessDirtyRegisters(u32 method, u32 argument) {
+    constexpr u32 rt_start = MAXWELL3D_REG_INDEX(rt);
+    constexpr u32 rt_words = sizeof(Regs::RenderTargetConfig) / sizeof(u32);
+    constexpr u32 dimension_word =
+        offsetof(Regs::RenderTargetConfig, array_pitch) / sizeof(u32) - 1;
     regs.reg_array[method] = argument;
+    if (method >= rt_start && method < rt_start + Regs::NumRenderTargets * rt_words) {
+        const u32 index = (method - rt_start) / rt_words;
+        const u32 first_word = rt_start + index * rt_words;
+        const std::span<const u32, 10> rt{regs.reg_array.data() + first_word, 10};
+        // Check after each RT write: ArrayPitch can arrive after the corrupted layer count.
+        // Fix the live registers so clear/macro execution and resource creation agree.
+        if (Workarounds::IsZeroKaiCorruptedLayerCount(system.GetApplicationProcessProgramID(),
+                                                      system.GetApplicationProcessBuildID(),
+                                                      rt[dimension_word], rt)) {
+            const GPUVAddr address = regs.rt[index].Address();
+            const u64 layer_bytes = u64{rt[7]} * 4;
+            if (memory_manager.IsFullyMappedRange(address, layer_bytes) &&
+                !memory_manager.IsFullyMappedRange(address, layer_bytes * 257)) {
+                regs.reg_array[first_word + dimension_word] = 1;
+                for (const auto& table : dirty.tables) {
+                    dirty.flags[table[first_word + dimension_word]] = true;
+                }
+                if (!zero_kai_layer_fix_logged) {
+                    LOG_WARNING(HW_GPU,
+                                "Zero Kai HK 1.01 RT workaround: rt={}, gpu=0x{:x}, "
+                                "restoring corrupted layers=0x101 to 1, layer_bytes={}",
+                                index, address, layer_bytes);
+                    zero_kai_layer_fix_logged = true;
+                }
+            }
+        }
+    }
     for (const auto& table : dirty.tables)
         dirty.flags[table[method]] = true;
 }

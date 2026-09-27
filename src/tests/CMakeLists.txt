@@ -19,6 +19,7 @@ add_executable(tests
     precompiled_headers.h
     video_core/memory_tracker.cpp
     video_core/image_size.cpp
+    video_core/zero_kai_workaround.cpp
     input_common/calibration_configuration_job.cpp
 )
 

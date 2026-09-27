@@ -56,6 +56,7 @@ add_library(video_core STATIC
     engines/kepler_memory.h
     engines/maxwell_3d.cpp
     engines/maxwell_3d.h
+    engines/zero_kai_workaround.h
     engines/maxwell_dma.cpp
     engines/maxwell_dma.h
     engines/puller.cpp
