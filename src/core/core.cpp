@@ -357,6 +357,7 @@ struct System::Impl {
                             const std::string& filepath,
                             Service::AM::FrontendAppletParameters& params) {
         exit_result.store(SystemResultStatus::Success);
+        build_id = {};
         InitializeKernel(system);
 
         const auto file = GetGameFileFromPath(virtual_filesystem, filepath);
