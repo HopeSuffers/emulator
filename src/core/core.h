@@ -460,7 +460,10 @@ public:
     void RegisterExitCallback(ExitCallback&& callback);
 
     /// Instructs the frontend to exit the application.
-    void Exit();
+    void Exit(SystemResultStatus result = SystemResultStatus::Success);
+
+    /// Result supplied when a worker requested frontend shutdown.
+    [[nodiscard]] SystemResultStatus GetExitResult() const;
 
     /// Applies any changes to settings to this core instance.
     void ApplySettings();

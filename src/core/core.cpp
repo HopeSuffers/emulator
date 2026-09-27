@@ -356,6 +356,7 @@ struct System::Impl {
     SystemResultStatus Load(System& system, Frontend::EmuWindow& emu_window,
                             const std::string& filepath,
                             Service::AM::FrontendAppletParameters& params) {
+        exit_result.store(SystemResultStatus::Success);
         InitializeKernel(system);
 
         const auto file = GetGameFileFromPath(virtual_filesystem, filepath);
@@ -616,6 +617,7 @@ struct System::Impl {
 
     ExecuteProgramCallback execute_program_callback;
     ExitCallback exit_callback;
+    std::atomic<SystemResultStatus> exit_result{SystemResultStatus::Success};
     std::stop_source stop_event;
 
     std::array<u64, Core::Hardware::NUM_CPU_CORES> dynarmic_ticks{};
@@ -1109,13 +1111,18 @@ void System::RegisterExitCallback(ExitCallback&& callback) {
     impl->exit_callback = std::move(callback);
 }
 
-void System::Exit() {
+void System::Exit(SystemResultStatus result) {
+    if (result != SystemResultStatus::Success) {
+        impl->exit_result.store(result);
+    }
     if (impl->exit_callback) {
         impl->exit_callback();
     } else {
         LOG_CRITICAL(Core, "exit_callback must be initialized by the frontend");
     }
 }
+
+SystemResultStatus System::GetExitResult() const { return impl->exit_result.load(); }
 
 void System::ApplySettings() {
     Common::Log::Filter filter;

@@ -617,7 +617,19 @@ Core::SystemResultStatus EmulationSession::InitializeEmulation(const std::string
     // Complete initialization.
     m_system.GPU().Start();
     m_system.GetCpuManager().OnGpuReady();
-    m_system.RegisterExitCallback([&] { HaltEmulation(); });
+    m_system.RegisterExitCallback([&] {
+        if (m_system.GetExitResult() == Core::SystemResultStatus::ErrorVideoCore) {
+            // This callback runs on the failed GPU thread. Do not wait on m_mutex:
+            // pause/shutdown can hold it while joining CPUs that await GPU fences.
+            // RunEmulation's periodic wait also observes these atomic flags if it
+            // misses the notification before entering its wait.
+            m_is_shutting_down = true;
+            m_is_running = false;
+            m_cv.notify_one();
+        } else {
+            HaltEmulation();
+        }
+    });
 
     // Register an ExecuteProgram callback such that Core can execute a sub-program
     m_system.RegisterExecuteProgramCallback([&](std::size_t program_index_) {
@@ -662,7 +674,7 @@ void EmulationSession::ShutdownEmulation() {
             std::scoped_lock window_lock(m_window_mutex);
             m_window.reset();
         }
-        OnEmulationStopped(Core::SystemResultStatus::Success);
+        OnEmulationStopped(m_system.GetExitResult());
         return;
     }
 

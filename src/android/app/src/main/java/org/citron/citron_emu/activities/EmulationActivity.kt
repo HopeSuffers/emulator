@@ -38,6 +38,7 @@ import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.lifecycleScope
 import androidx.navigation.fragment.NavHostFragment
 import androidx.preference.PreferenceManager
+import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -541,6 +542,13 @@ class EmulationActivity : AppCompatActivity(), SensorEventListener {
                 withContext(NonCancellable) {
                     if (status == 0 && emulationViewModel.programChanged.value == -1) {
                         finish()
+                    } else if (status != 0) {
+                        MaterialAlertDialogBuilder(this@EmulationActivity)
+                            .setTitle(R.string.emulation_graphics_error)
+                            .setMessage(R.string.emulation_graphics_error_description)
+                            .setPositiveButton(android.R.string.ok) { _, _ -> finish() }
+                            .setOnDismissListener { finish() }
+                            .show()
                     }
                     emulationViewModel.setEmulationStopped(true)
                 }

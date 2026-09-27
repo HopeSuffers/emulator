@@ -1,6 +1,8 @@
 // SPDX-FileCopyrightText: Copyright 2019 yuzu Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
+#include <new>
+
 #include "common/assert.h"
 #include "common/profiling.h"
 #include "common/scope_exit.h"
@@ -13,6 +15,8 @@
 #include "video_core/gpu.h"
 #include "video_core/gpu_thread.h"
 #include "video_core/renderer_base.h"
+#include "video_core/texture_cache/image_size.h"
+#include "video_core/vulkan_common/vulkan_wrapper.h"
 
 namespace VideoCommon::GPUThread {
 
@@ -26,6 +30,16 @@ static void RunThread(std::stop_token stop_token, Core::System& system, VideoCor
     VideoCore::RasterizerInterface* const rasterizer = renderer.ReadRasterizer();
 
     CommandDataContainer next;
+    bool failed = false;
+
+    const auto request_failure_shutdown = [&](const char* reason) {
+        LOG_ERROR(HW_GPU, "Stopping GPU execution after resource failure: {}", reason);
+        failed = true;
+        // Do not continue executing partially processed command lists or invent a dummy image.
+        // Wake GPU sync waiters, then let the frontend stop the CPU and destroy the renderer.
+        system.GPU().NotifyShutdown();
+        system.Exit(Core::SystemResultStatus::ErrorVideoCore);
+    };
 
     while (!stop_token.stop_requested()) {
         state.queue.PopWait(next, stop_token);
@@ -33,18 +47,36 @@ static void RunThread(std::stop_token stop_token, Core::System& system, VideoCor
             break;
         }
         CITRON_PROFILE_SCOPE("GPUThread::ProcessCommand");
-        if (auto* submit_list = std::get_if<SubmitListCommand>(&next.data)) {
-            scheduler.Push(submit_list->channel, std::move(submit_list->entries));
-        } else if (std::holds_alternative<GPUTickCommand>(next.data)) {
-            system.GPU().TickWork();
-        } else if (const auto* flush = std::get_if<FlushRegionCommand>(&next.data)) {
-            rasterizer->FlushRegion(flush->addr, flush->size);
-        } else if (const auto* invalidate = std::get_if<InvalidateRegionCommand>(&next.data)) {
-            rasterizer->OnCacheInvalidation(invalidate->addr, invalidate->size);
-        } else if (std::holds_alternative<SynchronizeCommand>(next.data)) {
-            // The command's fence is signaled below after all earlier queue entries are processed.
-        } else {
-            ASSERT(false);
+        // After failure, retire queued commands without executing partially updated GPU state.
+        // Barriers below still wake their callers, allowing frontend shutdown to join the CPUs.
+        if (!failed) {
+            try {
+                if (auto* submit_list = std::get_if<SubmitListCommand>(&next.data)) {
+                    scheduler.Push(submit_list->channel, std::move(submit_list->entries));
+                } else if (std::holds_alternative<GPUTickCommand>(next.data)) {
+                    system.GPU().TickWork();
+                } else if (const auto* flush = std::get_if<FlushRegionCommand>(&next.data)) {
+                    rasterizer->FlushRegion(flush->addr, flush->size);
+                } else if (const auto* invalidate =
+                               std::get_if<InvalidateRegionCommand>(&next.data)) {
+                    rasterizer->OnCacheInvalidation(invalidate->addr, invalidate->size);
+                } else if (std::holds_alternative<SynchronizeCommand>(next.data)) {
+                    // The command's fence is signaled below after all earlier queue entries are
+                    // processed.
+                } else {
+                    ASSERT(false);
+                }
+            } catch (const VideoCommon::InvalidImageSize& exception) {
+                request_failure_shutdown(exception.what());
+            } catch (const Vulkan::vk::Exception& exception) {
+                if (exception.GetResult() != VK_ERROR_OUT_OF_DEVICE_MEMORY &&
+                    exception.GetResult() != VK_ERROR_OUT_OF_HOST_MEMORY) {
+                    throw;
+                }
+                request_failure_shutdown(exception.what());
+            } catch (const std::bad_alloc& exception) {
+                request_failure_shutdown(exception.what());
+            }
         }
         state.signaled_fence.store(next.fence);
         if (next.block) {
