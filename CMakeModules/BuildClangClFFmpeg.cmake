@@ -252,10 +252,19 @@ exit 1
         "--extra-cflags='${_ffmpeg_extra_cflags}'")
     string(JOIN " " _ffmpeg_configure_command ${_ffmpeg_configure_command})
 
-    # Flag sentinel: if recorded configure flags/command differ from current, remove stamp so ninja rebuilds.
+    # Cache key: configure command, configure script, and generated pkg-config wrapper.
     set(_ffmpeg_flags_sentinel "${_install_dir}/.citron-clangcl-extra-cflags")
     set(_ffmpeg_flags_sentinel_content "")
-    set(_current_sentinel_hash "${_ffmpeg_configure_command} ${_ffmpeg_extra_cflags}")
+    file(SHA256 "${_source_dir}/configure" _ffmpeg_configure_hash)
+    set(_ffnvcodec_pkg_config_hash "")
+    if(_ffnvcodec_inc_dir)
+        file(SHA256 "${_build_dir_win}/pkg-config" _ffnvcodec_pkg_config_hash)
+    endif()
+    string(SHA256 _current_sentinel_hash
+        "${_ffmpeg_configure_command}
+${_ffmpeg_extra_cflags}
+${_ffmpeg_configure_hash}
+${_ffnvcodec_pkg_config_hash}")
     if (EXISTS "${_ffmpeg_flags_sentinel}")
         file(READ "${_ffmpeg_flags_sentinel}" _ffmpeg_flags_sentinel_content)
         string(STRIP "${_ffmpeg_flags_sentinel_content}" _ffmpeg_flags_sentinel_content)
