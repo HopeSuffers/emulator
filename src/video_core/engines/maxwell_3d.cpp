@@ -1,8 +1,11 @@
 // SPDX-FileCopyrightText: Copyright 2018 yuzu Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
+#include <array>
 #include <cstring>
 #include <optional>
+#include <span>
+#include "citron/util/title_ids.h"
 #include "common/assert.h"
 #include "common/bit_util.h"
 #include "common/scope_exit.h"
@@ -13,13 +16,61 @@
 #include "video_core/dirty_flags.h"
 #include "video_core/engines/draw_manager.h"
 #include "video_core/engines/maxwell_3d.h"
-#include "video_core/engines/zero_kai_workaround.h"
 #include "video_core/gpu.h"
 #include "video_core/memory_manager.h"
 #include "video_core/rasterizer_interface.h"
 #include "video_core/textures/texture.h"
 
 namespace Tegra::Engines {
+
+namespace {
+
+constexpr std::array<u8, 32> ZeroKai101BuildId{
+    0xec, 0xde, 0xeb, 0xa2, 0x66, 0x13, 0x03, 0xb1, 0x1b, 0x0d,
+    0x3e, 0x24, 0x6c, 0x86, 0xc9, 0x94, 0x07, 0xc5, 0x08, 0x73,
+};
+
+// Zero Kai HK 1.01 indexes a 0xff queue sentinel without checking it. The resulting
+// out-of-bounds byte store changes its temporary NVN view's layer count from 1 to
+// 0x101. Match only the captured render target, never ordinary 257-layer images.
+[[nodiscard]] constexpr bool IsZeroKaiCorruptedLayerCount(u64 title_id,
+                                                          const std::array<u8, 32>& build_id,
+                                                          u32 dimension,
+                                                          std::span<const u32, 10> rt) {
+    return title_id == UICommon::TitleID::ZeroKaiHK && build_id == ZeroKai101BuildId &&
+           dimension == 0x101 && rt[2] == 1920 && rt[3] == 1080 && rt[4] == 0xc6 && rt[5] == 0x40 &&
+           rt[7] == 0x438000 && rt[8] == 0;
+}
+
+// Preserve the matching/exclusion regression checks without exposing this private helper.
+static_assert([] {
+    constexpr auto title_id = UICommon::TitleID::ZeroKaiHK;
+    constexpr std::array<u32, 10> rt{5, 0x6c680000, 1920, 1080, 0xc6, 0x40, 0x101, 0x438000, 0, 0};
+    if (!IsZeroKaiCorruptedLayerCount(title_id, ZeroKai101BuildId, rt[6], rt) ||
+        IsZeroKaiCorruptedLayerCount(title_id + 1, ZeroKai101BuildId, rt[6], rt)) {
+        return false;
+    }
+    auto different_build = ZeroKai101BuildId;
+    different_build[0] ^= 1;
+    if (IsZeroKaiCorruptedLayerCount(title_id, different_build, rt[6], rt)) {
+        return false;
+    }
+    for (u32 layers : {1U, 16U, 32U, 256U, 258U, 512U}) {
+        if (IsZeroKaiCorruptedLayerCount(title_id, ZeroKai101BuildId, layers, rt)) {
+            return false;
+        }
+    }
+    for (size_t word : {2U, 3U, 4U, 5U, 7U, 8U}) {
+        auto different_rt = rt;
+        different_rt[word] ^= 1;
+        if (IsZeroKaiCorruptedLayerCount(title_id, ZeroKai101BuildId, rt[6], different_rt)) {
+            return false;
+        }
+    }
+    return true;
+}());
+
+} // namespace
 
 /// First register id that is actually a Macro call.
 constexpr u32 MacroRegistersStart = 0xE00;
@@ -319,9 +370,9 @@ void Maxwell3D::ProcessDirtyRegisters(u32 method, u32 argument) {
         const std::span<const u32, 10> rt{regs.reg_array.data() + first_word, 10};
         // Check after each RT write: ArrayPitch can arrive after the corrupted layer count.
         // Fix the live registers so clear/macro execution and resource creation agree.
-        if (Workarounds::IsZeroKaiCorruptedLayerCount(system.GetApplicationProcessProgramID(),
-                                                      system.GetApplicationProcessBuildID(),
-                                                      rt[dimension_word], rt)) {
+        if (IsZeroKaiCorruptedLayerCount(system.GetApplicationProcessProgramID(),
+                                         system.GetApplicationProcessBuildID(), rt[dimension_word],
+                                         rt)) {
             const GPUVAddr address = regs.rt[index].Address();
             const u64 layer_bytes = u64{rt[7]} * 4;
             if (memory_manager.IsFullyMappedRange(address, layer_bytes) &&
