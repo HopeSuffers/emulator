@@ -14,6 +14,7 @@
 #include "video_core/engines/kepler_compute.h"
 #include "video_core/guest_memory.h"
 #include "video_core/host1x/gpu_device_memory_manager.h"
+#include "video_core/texture_cache/image_size.h"
 #include "video_core/texture_cache/image_view_base.h"
 #include "video_core/texture_cache/samples_helper.h"
 #include "video_core/texture_cache/texture_cache_base.h"
@@ -191,7 +192,7 @@ typename P::ImageView& TextureCache<P>::GetImageView(ImageViewId id) noexcept {
 }
 
 template <class P>
-typename P::ImageView& TextureCache<P>::GetImageView(u32 index) noexcept {
+typename P::ImageView& TextureCache<P>::GetImageView(u32 index) {
     const auto image_view_id = VisitImageView(channel_state->graphics_image_table,
                                               channel_state->graphics_image_view_ids, index);
     return slot_image_views[image_view_id];
@@ -1203,6 +1204,10 @@ ImageId TextureCache<P>::FindOrInsertImage(const ImageInfo& info, GPUVAddr gpu_a
 template <class P>
 ImageId TextureCache<P>::FindImage(const ImageInfo& info, GPUVAddr gpu_addr,
                                    RelaxedOptions options) {
+    const u64 range_end = ImageSize::Add(gpu_addr, CalculateGuestSizeInBytes(info));
+    if (!gpu_memory->IsWithinGPUAddressRange(range_end - 1)) {
+        throw InvalidImageSize{"Image backing range exceeds GPU address space"};
+    }
     std::optional<DAddr> cpu_addr = gpu_memory->GpuToCpuAddress(gpu_addr);
     if (!cpu_addr) {
         cpu_addr = gpu_memory->GpuToCpuAddress(gpu_addr, CalculateGuestSizeInBytes(info));
@@ -1419,13 +1424,18 @@ bool TextureCache<P>::ScaleDown(Image& image) {
 template <class P>
 ImageId TextureCache<P>::InsertImage(const ImageInfo& info, GPUVAddr gpu_addr,
                                      RelaxedOptions options) {
+    const u64 range_end = ImageSize::Add(gpu_addr, CalculateGuestSizeInBytes(info));
+    if (!gpu_memory->IsWithinGPUAddressRange(range_end - 1)) {
+        throw InvalidImageSize{"Image backing range exceeds GPU address space"};
+    }
     std::optional<DAddr> cpu_addr = gpu_memory->GpuToCpuAddress(gpu_addr);
     if (!cpu_addr) {
         const auto size = CalculateGuestSizeInBytes(info);
         cpu_addr = gpu_memory->GpuToCpuAddress(gpu_addr, size);
         if (!cpu_addr) {
             const DAddr fake_addr = ~(1ULL << 40ULL) + virtual_invalid_space;
-            virtual_invalid_space += Common::AlignUp(size, 32);
+            virtual_invalid_space =
+                ImageSize::Add(virtual_invalid_space, ImageSize::AlignUp(size, 32));
             cpu_addr = std::optional<DAddr>(fake_addr);
         }
     }

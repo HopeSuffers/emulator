@@ -356,6 +356,14 @@ struct System::Impl {
     SystemResultStatus Load(System& system, Frontend::EmuWindow& emu_window,
                             const std::string& filepath,
                             Service::AM::FrontendAppletParameters& params) {
+        {
+            std::scoped_lock lock(exit_callback_mutex);
+            exit_callback = {};
+            exit_callback_requested = false;
+            exit_callback_delivered = false;
+            exit_result.store(SystemResultStatus::Success);
+        }
+        build_id = {};
         InitializeKernel(system);
 
         const auto file = GetGameFileFromPath(virtual_filesystem, filepath);
@@ -615,7 +623,11 @@ struct System::Impl {
     bool extended_memory_layout{};
 
     ExecuteProgramCallback execute_program_callback;
+    std::mutex exit_callback_mutex;
     ExitCallback exit_callback;
+    bool exit_callback_requested = false;
+    bool exit_callback_delivered = false;
+    std::atomic<SystemResultStatus> exit_result{SystemResultStatus::Success};
     std::stop_source stop_event;
 
     std::array<u64, Core::Hardware::NUM_CPU_CORES> dynarmic_ticks{};
@@ -1106,16 +1118,41 @@ Service::Event& System::GetGeneralChannelEvent() {
 }
 
 void System::RegisterExitCallback(ExitCallback&& callback) {
-    impl->exit_callback = std::move(callback);
-}
-
-void System::Exit() {
-    if (impl->exit_callback) {
-        impl->exit_callback();
-    } else {
-        LOG_CRITICAL(Core, "exit_callback must be initialized by the frontend");
+    ExitCallback pending_callback;
+    {
+        std::scoped_lock lock(impl->exit_callback_mutex);
+        impl->exit_callback = std::move(callback);
+        if (impl->exit_callback_requested && !impl->exit_callback_delivered &&
+            impl->exit_callback) {
+            pending_callback = impl->exit_callback;
+            impl->exit_callback_delivered = true;
+        }
+    }
+    if (pending_callback) {
+        pending_callback();
     }
 }
+
+void System::Exit(SystemResultStatus result) {
+    ExitCallback callback;
+    {
+        std::scoped_lock lock(impl->exit_callback_mutex);
+        if (result != SystemResultStatus::Success &&
+            impl->exit_result.load() == SystemResultStatus::Success) {
+            impl->exit_result.store(result);
+        }
+        impl->exit_callback_requested = true;
+        if (!impl->exit_callback_delivered && impl->exit_callback) {
+            callback = impl->exit_callback;
+            impl->exit_callback_delivered = true;
+        }
+    }
+    if (callback) {
+        callback();
+    }
+}
+
+SystemResultStatus System::GetExitResult() const { return impl->exit_result.load(); }
 
 void System::ApplySettings() {
     Common::Log::Filter filter;

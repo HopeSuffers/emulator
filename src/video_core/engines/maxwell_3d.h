@@ -3188,6 +3188,7 @@ private:
 
     Core::System& system;
     MemoryManager& memory_manager;
+    bool zero_kai_layer_fix_logged = false;
 
     VideoCore::RasterizerInterface* rasterizer = nullptr;
 

@@ -8,6 +8,7 @@
 #include "video_core/surface.h"
 #include "video_core/texture_cache/format_lookup_table.h"
 #include "video_core/texture_cache/image_info.h"
+#include "video_core/texture_cache/image_size.h"
 #include "video_core/texture_cache/samples_helper.h"
 #include "video_core/texture_cache/types.h"
 #include "video_core/texture_cache/util.h"
@@ -25,7 +26,7 @@ using VideoCore::Surface::SurfaceType;
 constexpr u32 RescaleHeightThreshold = 288;
 constexpr u32 DownscaleHeightThreshold = 512;
 
-ImageInfo::ImageInfo(const TICEntry& config) noexcept {
+ImageInfo::ImageInfo(const TICEntry& config) {
     forced_flushed = config.IsPitchLinear() && !Settings::values.use_reactive_flushing.GetValue();
     dma_downloaded = forced_flushed;
     format = PixelFormatFromTextureInfo(config.format, config.r_type, config.g_type, config.b_type,
@@ -108,8 +109,10 @@ ImageInfo::ImageInfo(const TICEntry& config) noexcept {
         break;
     }
     if (num_samples > 1) {
-        size.width *= NumSamplesX(config.msaa_mode);
-        size.height *= NumSamplesY(config.msaa_mode);
+        size.width =
+            ImageSize::Narrow(ImageSize::Multiply(size.width, NumSamplesX(config.msaa_mode)));
+        size.height =
+            ImageSize::Narrow(ImageSize::Multiply(size.height, NumSamplesY(config.msaa_mode)));
     }
     if (type != ImageType::Linear) {
         // FIXME: Call this without passing *this
@@ -123,7 +126,7 @@ ImageInfo::ImageInfo(const TICEntry& config) noexcept {
 }
 
 ImageInfo::ImageInfo(const Maxwell3D::Regs::RenderTargetConfig& ct,
-                     Tegra::Texture::MsaaMode msaa_mode) noexcept {
+                     Tegra::Texture::MsaaMode msaa_mode) {
     forced_flushed =
         ct.tile_mode.is_pitch_linear && !Settings::values.use_reactive_flushing.GetValue();
     dma_downloaded = forced_flushed;
@@ -143,7 +146,7 @@ ImageInfo::ImageInfo(const Maxwell3D::Regs::RenderTargetConfig& ct,
     }
     size.width = ct.width;
     size.height = ct.height;
-    layer_stride = ct.array_pitch * 4;
+    layer_stride = ImageSize::Narrow(ImageSize::Multiply(ct.array_pitch, 4));
     maybe_unaligned_layer_stride = layer_stride;
     num_samples = NumSamples(msaa_mode);
     block = Extent3D{
@@ -164,7 +167,7 @@ ImageInfo::ImageInfo(const Maxwell3D::Regs::RenderTargetConfig& ct,
 }
 
 ImageInfo::ImageInfo(const Maxwell3D::Regs::Zeta& zt, const Maxwell3D::Regs::ZetaSize& zt_size,
-                     Tegra::Texture::MsaaMode msaa_mode) noexcept {
+                     Tegra::Texture::MsaaMode msaa_mode) {
     forced_flushed =
         zt.tile_mode.is_pitch_linear && !Settings::values.use_reactive_flushing.GetValue();
     dma_downloaded = forced_flushed;
@@ -173,7 +176,7 @@ ImageInfo::ImageInfo(const Maxwell3D::Regs::Zeta& zt, const Maxwell3D::Regs::Zet
     size.height = zt_size.height;
     rescaleable = false;
     resources.levels = 1;
-    layer_stride = zt.array_pitch * 4;
+    layer_stride = ImageSize::Narrow(ImageSize::Multiply(zt.array_pitch, 4));
     maybe_unaligned_layer_stride = layer_stride;
     num_samples = NumSamples(msaa_mode);
     block = Extent3D{
@@ -185,7 +188,7 @@ ImageInfo::ImageInfo(const Maxwell3D::Regs::Zeta& zt, const Maxwell3D::Regs::Zet
         ASSERT(zt.tile_mode.dim_control ==
                Maxwell3D::Regs::TileMode::DimensionControl::DefineArraySize);
         type = ImageType::Linear;
-        pitch = size.width * BytesPerBlock(format);
+        pitch = ImageSize::Narrow(ImageSize::Multiply(size.width, BytesPerBlock(format)));
     } else if (zt.tile_mode.dim_control ==
                Maxwell3D::Regs::TileMode::DimensionControl::DefineDepthSize) {
         ASSERT(zt_size.dim_control == Maxwell3D::Regs::ZetaSize::DimensionControl::ArraySizeIsOne);
@@ -206,7 +209,7 @@ ImageInfo::ImageInfo(const Maxwell3D::Regs::Zeta& zt, const Maxwell3D::Regs::Zet
     }
 }
 
-ImageInfo::ImageInfo(const Fermi2D::Surface& config) noexcept {
+ImageInfo::ImageInfo(const Fermi2D::Surface& config) {
     UNIMPLEMENTED_IF_MSG(config.layer != 0, "Surface layer is not zero");
     forced_flushed = config.linear == Fermi2D::MemoryLayout::Pitch &&
                      !Settings::values.use_reactive_flushing.GetValue();
@@ -259,7 +262,7 @@ static PixelFormat ByteSizeToFormat(u32 bytes_per_pixel) {
     }
 }
 
-ImageInfo::ImageInfo(const Tegra::DMA::ImageOperand& config) noexcept {
+ImageInfo::ImageInfo(const Tegra::DMA::ImageOperand& config) {
     const u32 bytes_per_pixel = config.bytes_per_pixel;
     format = ByteSizeToFormat(bytes_per_pixel);
     type = config.params.block_size.depth > 0 ? ImageType::e3D : ImageType::e2D;

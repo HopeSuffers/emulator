@@ -26,6 +26,7 @@
 #include "video_core/renderer_vulkan/vk_scheduler.h"
 #include "video_core/renderer_vulkan/vk_staging_buffer_pool.h"
 #include "video_core/texture_cache/formatter.h"
+#include "video_core/texture_cache/image_size.h"
 #include "video_core/texture_cache/samples_helper.h"
 #include "video_core/texture_cache/util.h"
 #include "video_core/vulkan_common/vulkan_device.h"
@@ -1012,7 +1013,13 @@ void TextureCacheRuntime::ReinterpretImage(Image& dst, Image& src,
     const u32 img_bpp = BytesPerBlock(dst.info.format);
     size_t total_size = 0;
     for (const auto& copy : copies) {
-        total_size += copy.extent.width * copy.extent.height * copy.extent.depth * img_bpp;
+        total_size = VideoCommon::ImageSize::Add(
+            total_size,
+            VideoCommon::ImageSize::Multiply(
+                VideoCommon::ImageSize::Multiply(
+                    VideoCommon::ImageSize::Multiply(copy.extent.width, copy.extent.height),
+                    copy.extent.depth),
+                img_bpp));
     }
     const VkBuffer copy_buffer = GetTemporaryBuffer(total_size);
     const VkImage dst_image = dst.Handle();
