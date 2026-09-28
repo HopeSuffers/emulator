@@ -192,7 +192,7 @@ typename P::ImageView& TextureCache<P>::GetImageView(ImageViewId id) noexcept {
 }
 
 template <class P>
-typename P::ImageView& TextureCache<P>::GetImageView(u32 index) noexcept {
+typename P::ImageView& TextureCache<P>::GetImageView(u32 index) {
     const auto image_view_id = VisitImageView(channel_state->graphics_image_table,
                                               channel_state->graphics_image_view_ids, index);
     return slot_image_views[image_view_id];
