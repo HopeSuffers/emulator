@@ -455,6 +455,8 @@ public:
 
     /**
      * Registers a callback from the frontend for System to exit the application.
+     * A pending exit is delivered synchronously during registration. The callback
+     * is invoked at most once per loaded application.
      * @param callback Callback from the frontend to exit the application.
      */
     void RegisterExitCallback(ExitCallback&& callback);

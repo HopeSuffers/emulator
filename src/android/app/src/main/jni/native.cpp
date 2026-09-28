@@ -617,19 +617,6 @@ Core::SystemResultStatus EmulationSession::InitializeEmulation(const std::string
     // Complete initialization.
     m_system.GPU().Start();
     m_system.GetCpuManager().OnGpuReady();
-    m_system.RegisterExitCallback([&] {
-        if (m_system.GetExitResult() == Core::SystemResultStatus::ErrorVideoCore) {
-            // This callback runs on the failed GPU thread. Do not wait on m_mutex:
-            // pause/shutdown can hold it while joining CPUs that await GPU fences.
-            // RunEmulation's periodic wait also observes these atomic flags if it
-            // misses the notification before entering its wait.
-            m_is_shutting_down = true;
-            m_is_running = false;
-            m_cv.notify_one();
-        } else {
-            HaltEmulation();
-        }
-    });
 
     // Register an ExecuteProgram callback such that Core can execute a sub-program
     m_system.RegisterExecuteProgramCallback([&](std::size_t program_index_) {
@@ -711,12 +698,34 @@ void EmulationSession::RunEmulation() {
         m_is_running = true;
     }
 
+    // GPU and CPU workers can request exit before this point. Register after setting
+    // m_is_running so a pending exit cannot be overwritten by startup, and outside
+    // m_mutex because a pending non-GPU exit calls HaltEmulation().
+    m_system.RegisterExitCallback([&] {
+        if (m_system.GetExitResult() == Core::SystemResultStatus::ErrorVideoCore) {
+            // This callback can run on the failed GPU thread. Do not wait on m_mutex:
+            // pause/shutdown can hold it while joining CPUs that await GPU fences.
+            m_is_shutting_down = true;
+            m_is_running = false;
+            m_cv.notify_one();
+        } else {
+            HaltEmulation();
+        }
+    });
+    if (!m_is_running) {
+        return;
+    }
+
     // Load the disk shader cache.
     if (Settings::values.use_disk_shader_cache.GetValue()) {
         LoadDiskCacheProgress(VideoCore::LoadCallbackStage::Prepare, 0, 0);
         m_system.Renderer().ReadRasterizer()->LoadDiskResources(
             m_system.GetApplicationProcessProgramID(), std::stop_token{}, LoadDiskCacheProgress);
         LoadDiskCacheProgress(VideoCore::LoadCallbackStage::Complete, 0, 0);
+    }
+
+    if (!m_is_running) {
+        return;
     }
 
     void(m_system.Run());
