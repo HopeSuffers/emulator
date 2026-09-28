@@ -692,6 +692,10 @@ void EmulationSession::HaltEmulation() {
 }
 
 void EmulationSession::RunEmulation() {
+    SCOPE_EXIT {
+        m_applet_id = static_cast<int>(Service::AM::AppletId::Application);
+    };
+
     {
         std::scoped_lock lock(m_mutex);
         m_is_paused = false;
@@ -744,9 +748,6 @@ void EmulationSession::RunEmulation() {
             }
         }
     }
-
-    // Reset current applet ID.
-    m_applet_id = static_cast<int>(Service::AM::AppletId::Application);
 }
 
 Common::Android::SoftwareKeyboard::AndroidKeyboard* EmulationSession::SoftwareKeyboard() {
