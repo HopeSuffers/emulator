@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cstring>
 #include <functional>
 #include <memory>
 #include <mutex>
@@ -45,6 +46,7 @@ constexpr u32 NUM_VERTEX_BUFFERS = 16;
 #else
 constexpr u32 NUM_VERTEX_BUFFERS = 32;
 #endif
+constexpr u64 MAX_PADDED_VERTEX_BUFFER_SIZE = 1_MiB;
 constexpr u32 NUM_TRANSFORM_FEEDBACK_BUFFERS = 4;
 constexpr u32 NUM_GRAPHICS_UNIFORM_BUFFERS = 18;
 constexpr u32 NUM_COMPUTE_UNIFORM_BUFFERS = 8;

@@ -133,6 +133,12 @@ public:
         return ref.mapped_span;
     }
 
+    std::span<u8> BindMappedVertexBuffer(u32 index, u32 size, u32 stride) {
+        const StagingBufferRef ref = staging_pool.Request(size, MemoryUsage::Upload);
+        BindVertexBuffer(index, ref.buffer, static_cast<u32>(ref.offset), size, stride);
+        return ref.mapped_span;
+    }
+
     void BindUniformBuffer(VkBuffer buffer, u32 offset, u32 size) {
         BindBuffer(buffer, offset, size);
     }

@@ -749,6 +749,35 @@ void BufferCache<P>::BindHostVertexBuffers() {
         }
         runtime.BindVertexBuffers(host_bindings);
     }
+
+    if constexpr (!IS_OPENGL) {
+        const auto& draw_state = maxwell3d->draw_manager->GetDrawState();
+        if (draw_state.draw_indexed) {
+            return;
+        }
+        const u64 num_vertices = u64{draw_state.vertex_buffer.first} + draw_state.vertex_buffer.count;
+        const auto& regs = maxwell3d->regs;
+        for (u32 index = 0; index < NUM_VERTEX_BUFFERS; ++index) {
+            const Binding& binding = channel_state->vertex_buffers[index];
+            const u32 stride = regs.vertex_streams[index].stride;
+            if (binding.buffer_id == NULL_BUFFER_ID || stride == 0 ||
+                !regs.vertex_streams[index].enable ||
+                regs.vertex_stream_instances.IsInstancingEnabled(index)) {
+                continue;
+            }
+            const u64 needed = num_vertices * stride;
+            if (needed <= binding.size || needed > MAX_PADDED_VERTEX_BUFFER_SIZE ||
+                memory_tracker.IsRegionGpuModified(binding.device_addr, binding.size)) {
+                continue;
+            }
+            const u32 padded_size = static_cast<u32>(needed);
+            const std::span<u8> span = runtime.BindMappedVertexBuffer(index, padded_size, stride);
+            device_memory.ReadBlockUnsafe(binding.device_addr, span.data(), binding.size,
+                                          "BufferCache.BindPaddedVertexBuffer", false);
+            std::memset(span.data() + binding.size, 0, padded_size - binding.size);
+            flags[Dirty::VertexBuffer0 + index] = true;
+        }
+    }
 }
 
 template <class P>
