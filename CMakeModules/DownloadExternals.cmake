@@ -67,12 +67,10 @@ endfunction()
 function(download_moltenvk_external platform version)
     set(MOLTENVK_DIR "${CMAKE_BINARY_DIR}/externals/MoltenVK")
     set(MOLTENVK_TAR "${CMAKE_BINARY_DIR}/externals/MoltenVK.tar")
-    # Use Ryujinx MoltenVK build which is compiled with an older Metal SDK
-    # This avoids MSL 3.2 bugs with thread_scope_subgroup and fixes text rendering issues
     string(TOLOWER "${platform}" MOLTENVK_ASSET_PLATFORM)
     if (NOT EXISTS ${MOLTENVK_DIR})
         if (NOT EXISTS ${MOLTENVK_TAR})
-            file(DOWNLOAD https://github.com/V380-Ori/Ryujinx.MoltenVK/releases/download/${version}-ryujinx/MoltenVK-${MOLTENVK_ASSET_PLATFORM}.tar
+            file(DOWNLOAD https://github.com/KhronosGroup/MoltenVK/releases/download/${version}/MoltenVK-${MOLTENVK_ASSET_PLATFORM}.tar
                 ${MOLTENVK_TAR} SHOW_PROGRESS)
         endif()
 
@@ -160,19 +158,19 @@ function(determine_qt_parameters target host_out type_out arch_out arch_path_out
     set(${type_out} "${type}" PARENT_SCOPE)
     set(${arch_out} "${arch}" PARENT_SCOPE)
     set(${arch_path_out} "${arch_path}" PARENT_SCOPE)
-    
+
     if (DEFINED host_type)
         set(${host_type_out} "${host_type}" PARENT_SCOPE)
     else()
         set(${host_type_out} "${type}" PARENT_SCOPE)
     endif()
-    
+
     if (DEFINED host_arch)
         set(${host_arch_out} "${host_arch}" PARENT_SCOPE)
     else()
         set(${host_arch_out} "${arch}" PARENT_SCOPE)
     endif()
-    
+
     if (DEFINED host_arch_path)
         set(${host_arch_path_out} "${host_arch_path}" PARENT_SCOPE)
     else()
