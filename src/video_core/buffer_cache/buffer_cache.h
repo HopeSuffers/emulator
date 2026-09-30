@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cstring>
 #include <memory>
 #include <numeric>
 
@@ -785,9 +786,21 @@ void BufferCache<P>::BindHostGraphicsUniformBuffer(size_t stage, u32 index, u32 
                                                    bool needs_bind) {
     const Binding& binding = channel_state->uniform_buffers[stage][index];
     const DAddr device_addr = binding.device_addr;
-    const u32 size = std::min(binding.size, (*channel_state->uniform_buffer_sizes)[stage][index]);
+    const u32 shader_size = (*channel_state->uniform_buffer_sizes)[stage][index];
+    const u32 size = std::min(binding.size, shader_size);
     Buffer& buffer = slot_buffers[binding.buffer_id];
     TouchBuffer(buffer, binding.buffer_id);
+    if constexpr (!IS_OPENGL) {
+        if (binding.buffer_id != NULL_BUFFER_ID && shader_size > binding.size &&
+            !memory_tracker.IsRegionGpuModified(device_addr, size)) {
+            const std::span<u8> span =
+                runtime.BindMappedUniformBuffer(stage, binding_index, shader_size);
+            device_memory.ReadBlockUnsafe(device_addr, span.data(), size,
+                                          "BufferCache.BindPaddedUniformBuffer", false);
+            std::memset(span.data() + size, 0, shader_size - size);
+            return;
+        }
+    }
     const bool use_fast_buffer = binding.buffer_id != NULL_BUFFER_ID &&
                                  size <= channel_state->uniform_buffer_skip_cache_size &&
                                  !memory_tracker.IsRegionGpuModified(device_addr, size);
