@@ -146,6 +146,11 @@ void Swapchain::Create(VkSurfaceKHR surface_, u32 width_, u32 height_) {
         return;
     }
 
+    {
+        std::scoped_lock lock{scheduler.submit_mutex};
+        device.GetLogical().WaitIdle();
+    }
+
     Destroy();
 
     CreateSwapchain(capabilities);
