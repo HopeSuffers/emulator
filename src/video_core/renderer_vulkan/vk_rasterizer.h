@@ -162,6 +162,8 @@ private:
 
     void FlushWork();
 
+    void RecordComputeWriteBarrier();
+
     void UpdateDynamicStates();
 
     void HandleTransformFeedback();
