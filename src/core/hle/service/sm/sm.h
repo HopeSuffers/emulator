@@ -79,7 +79,7 @@ public:
             if (factory) {
                 return std::static_pointer_cast<T>(factory());
             }
-            if (!block || kernel.IsShuttingDown()) {
+            if (!block) {
                 LOG_DEBUG(Service, "Can't find service: {}", service_name);
                 return nullptr;
             }
