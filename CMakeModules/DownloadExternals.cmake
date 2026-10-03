@@ -65,8 +65,8 @@ set(${prefix_var} "${prefix}" PARENT_SCOPE)
 endfunction()
 
 function(download_moltenvk_external platform version)
-    set(MOLTENVK_DIR "${CMAKE_BINARY_DIR}/externals/MoltenVK")
-    set(MOLTENVK_TAR "${CMAKE_BINARY_DIR}/externals/MoltenVK.tar")
+    set(MOLTENVK_DIR "${CMAKE_BINARY_DIR}/externals/MoltenVK-${version}")
+    set(MOLTENVK_TAR "${CMAKE_BINARY_DIR}/externals/MoltenVK-${version}.tar")
     string(TOLOWER "${platform}" MOLTENVK_ASSET_PLATFORM)
     if (NOT EXISTS ${MOLTENVK_DIR})
         if (NOT EXISTS ${MOLTENVK_TAR})
@@ -74,13 +74,12 @@ function(download_moltenvk_external platform version)
                 ${MOLTENVK_TAR} SHOW_PROGRESS)
         endif()
 
+        file(MAKE_DIRECTORY ${MOLTENVK_DIR})
         execute_process(COMMAND ${CMAKE_COMMAND} -E tar xf "${MOLTENVK_TAR}"
-            WORKING_DIRECTORY "${CMAKE_BINARY_DIR}/externals")
+            WORKING_DIRECTORY ${MOLTENVK_DIR})
     endif()
 
-    # Add the MoltenVK library path to the prefix so find_library can locate it.
-    list(APPEND CMAKE_PREFIX_PATH "${MOLTENVK_DIR}/MoltenVK/dylib/${platform}")
-    set(CMAKE_PREFIX_PATH ${CMAKE_PREFIX_PATH} PARENT_SCOPE)
+    set(MOLTENVK_LIBRARY_DIR "${MOLTENVK_DIR}/MoltenVK/MoltenVK/dylib/${platform}" PARENT_SCOPE)
 endfunction()
 
 # Determine installation parameters for OS, architecture, and compiler
