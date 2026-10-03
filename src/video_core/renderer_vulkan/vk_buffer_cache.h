@@ -133,6 +133,10 @@ public:
         return ref.mapped_span;
     }
 
+    bool NeedsPaddedVertexBuffers() const {
+        return device.GetDriverID() == VK_DRIVER_ID_MOLTENVK;
+    }
+
     std::span<u8> BindMappedVertexBuffer(u32 index, u32 size, u32 stride) {
         const StagingBufferRef ref = staging_pool.Request(size, MemoryUsage::Upload);
         BindVertexBuffer(index, ref.buffer, static_cast<u32>(ref.offset), size, stride);
