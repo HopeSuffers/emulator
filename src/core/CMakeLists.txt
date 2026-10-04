@@ -1297,6 +1297,14 @@ if (HAS_NCE)
     target_link_libraries(core PRIVATE merry::oaknut)
 endif()
 
+if (HAS_HYPERVISOR)
+    target_sources(core PRIVATE
+        arm/hypervisor/hv_vm.cpp
+        arm/hypervisor/hv_vm.h
+    )
+    target_link_libraries(core PRIVATE "-framework Hypervisor")
+endif()
+
 if (ARCHITECTURE_x86_64 OR ARCHITECTURE_arm64)
     target_sources(core PRIVATE
         arm/dynarmic/arm_dynarmic.h

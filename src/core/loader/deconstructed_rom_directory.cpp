@@ -20,6 +20,10 @@
 #include "core/arm/nce/patcher.h"
 #endif
 
+#ifdef HAS_HYPERVISOR
+#include "core/arm/hypervisor/hv_vm.h"
+#endif
+
 #ifndef HAS_NCE
 namespace Core::NCE {
 class Patcher {};
@@ -208,6 +212,9 @@ AppLoader_DeconstructedRomDirectory::LoadResult AppLoader_DeconstructedRomDirect
         metadata.GetAddressSpaceType() == FileSys::ProgramAddressSpaceType::Is39Bit;
     const bool is_application = metadata.GetPoolPartition() == FileSys::PoolPartition::Application;
     Settings::SetNceEnabled(is_39bit);
+#ifdef HAS_HYPERVISOR
+    Core::Hypervisor::SelectForProcess(metadata.Is64BitProgram());
+#endif
 
     const std::array static_modules = {"rtld",    "main",    "subsdk0", "subsdk1", "subsdk2",
                                        "subsdk3", "subsdk4", "subsdk5", "subsdk6", "subsdk7",

@@ -22,6 +22,10 @@
 #include "core/loader/nso.h"
 #include "core/memory.h"
 
+#ifdef HAS_HYPERVISOR
+#include "core/arm/hypervisor/hv_vm.h"
+#endif
+
 #ifdef HAS_NCE
 #include "core/arm/nce/patcher.h"
 #endif
@@ -200,6 +204,11 @@ static bool LoadNroImpl(Core::System& system, Kernel::KProcess& process,
     codeset.DataSegment().size += bss_size;
     program_image.resize(static_cast<u32>(program_image.size()) + bss_size);
     size_t image_size = program_image.size();
+
+#ifdef HAS_HYPERVISOR
+    // NRO always 64-bit
+    Core::Hypervisor::SelectForProcess(true);
+#endif
 
 #ifdef HAS_NCE
     const auto& code = codeset.CodeSegment();

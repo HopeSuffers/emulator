@@ -228,14 +228,18 @@ struct Values {
 
     // Cpu
     SwitchableSetting<CpuBackend, true> cpu_backend{linkage,
-#ifdef HAS_NCE
+#if defined(HAS_NCE)
                                                     CpuBackend::Nce,
+#elif defined(HAS_HYPERVISOR)
+                                                    CpuBackend::Hypervisor,
 #else
                                                     CpuBackend::Dynarmic,
 #endif
                                                     CpuBackend::Dynarmic,
-#ifdef HAS_NCE
+#if defined(HAS_NCE)
                                                     CpuBackend::Nce,
+#elif defined(HAS_HYPERVISOR)
+                                                    CpuBackend::Hypervisor,
 #else
                                                     CpuBackend::Dynarmic,
 #endif
@@ -782,6 +786,8 @@ bool IsCpuUltraLowAccuracy();
 void SetNceEnabled(bool is_64bit);
 void DisableNceForCurrentProcess();
 bool IsNceEnabled();
+void SetHypervisorEnabled(bool is_usable);
+bool IsHypervisorEnabled();
 
 bool IsDockedMode();
 

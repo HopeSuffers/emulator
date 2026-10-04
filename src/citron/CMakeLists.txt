@@ -470,6 +470,12 @@ if (APPLE)
                                     XCODE_FILE_ATTRIBUTES "CodeSignOnCopy")
     target_sources(citron PRIVATE ${MOLTENVK_LIBRARY})
 
+    if (HAS_HYPERVISOR)
+        add_custom_command(TARGET citron POST_BUILD
+            COMMAND codesign --force --sign - --entitlements
+                    ${CMAKE_CURRENT_SOURCE_DIR}/citron.entitlements $<TARGET_BUNDLE_DIR:citron>)
+    endif()
+
 elseif(WIN32)
     # compile as a win32 gui application instead of a console application
     target_link_libraries(citron PRIVATE Qt6::EntryPointPrivate)

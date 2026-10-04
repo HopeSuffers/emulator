@@ -199,6 +199,20 @@ bool IsNceEnabled() {
     return is_nce_enabled;
 }
 
+static bool is_hypervisor_enabled = false;
+
+void SetHypervisorEnabled(bool is_usable) {
+    const bool is_selected = values.cpu_backend.GetValue() == CpuBackend::Hypervisor;
+    if (is_selected && is_usable && !values.use_multi_core.GetValue()) {
+        LOG_WARNING(Common, "The hypervisor backend requires multicore, falling back to Dynarmic");
+    }
+    is_hypervisor_enabled = is_selected && is_usable && values.use_multi_core.GetValue();
+}
+
+bool IsHypervisorEnabled() {
+    return is_hypervisor_enabled;
+}
+
 void DisableNceForCurrentProcess() {
     is_nce_enabled = false;
 }

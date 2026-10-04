@@ -315,6 +315,11 @@ if (ARCHITECTURE_arm64 AND (ANDROID OR ${CMAKE_SYSTEM_NAME} STREQUAL "Linux"))
     add_definitions(-DHAS_NCE=1)
 endif()
 
+if (ARCHITECTURE_arm64 AND ${CMAKE_SYSTEM_NAME} STREQUAL "Darwin")
+    set(HAS_HYPERVISOR 1)
+    add_definitions(-DHAS_HYPERVISOR=1)
+endif()
+
 # Configure C++ standard
 # ===========================
 
