@@ -36,6 +36,10 @@
 #include "video_core/host1x/host1x.h"
 #include "video_core/rasterizer_download_area.h"
 
+#ifdef HAS_HYPERVISOR
+#include "core/arm/hypervisor/hv_address_space.h"
+#endif
+
 namespace Core::Memory {
 
 static inline bool AddressSpaceContains(const Common::PageTable& table, const Common::ProcessAddress addr, const std::size_t size) {
@@ -62,6 +66,13 @@ struct Memory::Impl {
             current_page_table->fastmem_arena = nullptr;
         }
         buffer = std::addressof(system.DeviceMemory().buffer);
+
+#ifdef HAS_HYPERVISOR
+        if (!mapping_observer && process.IsApplication() && Settings::IsHypervisorEnabled()) {
+            mapping_observer =
+                std::make_unique<Hypervisor::AddressSpace>(system, *current_page_table);
+        }
+#endif
     }
 
     void MapMemoryRegion(Common::PageTable& page_table, Common::ProcessAddress base, u64 size,
@@ -75,6 +86,10 @@ struct Memory::Impl {
                (void(GetInteger(target)), true));
         MapPages(page_table, base / CITRON_PAGESIZE, size / CITRON_PAGESIZE, target,
                  Common::PageType::Memory);
+
+        if (mapping_observer) {
+            mapping_observer->Map(GetInteger(base), GetInteger(target), size, perms);
+        }
 
         if (current_page_table->fastmem_arena) {
             buffer->Map(GetInteger(base), GetInteger(target) - DramMemoryMap::Base, size, perms,
@@ -91,6 +106,10 @@ struct Memory::Impl {
         MapPages(page_table, base / CITRON_PAGESIZE, size / CITRON_PAGESIZE, 0,
                  Common::PageType::Unmapped);
 
+        if (mapping_observer) {
+            mapping_observer->Unmap(GetInteger(base), size);
+        }
+
         if (current_page_table->fastmem_arena) {
             buffer->Unmap(GetInteger(base), size, separate_heap);
         }
@@ -102,6 +121,10 @@ struct Memory::Impl {
                (void(size), true));
         assert((vaddr & CITRON_PAGEMASK) == 0 && "non-page aligned base: {:016X}" &&
                (void(vaddr), true));
+
+        if (mapping_observer) {
+            mapping_observer->Protect(vaddr, size, perms);
+        }
 
         if (!current_page_table->fastmem_arena) {
             return;
@@ -876,6 +899,7 @@ struct Memory::Impl {
     Core::System& system;
     Tegra::MaxwellDeviceMemoryManager* gpu_device_memory{};
     Common::PageTable* current_page_table = nullptr;
+    std::unique_ptr<GuestMappingObserver> mapping_observer;
 
     // Number of threads to use for parallel memory operations
     unsigned int thread_count = 2;

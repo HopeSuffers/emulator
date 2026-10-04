@@ -52,6 +52,14 @@ enum : u64 {
     DEFAULT_STACK_SIZE = 0x100000,
 };
 
+class GuestMappingObserver {
+public:
+    virtual ~GuestMappingObserver() = default;
+    virtual void Map(VAddr va, PAddr pa, u64 size, Common::MemoryPermission perm) = 0;
+    virtual void Unmap(VAddr va, u64 size) = 0;
+    virtual void Protect(VAddr va, u64 size, Common::MemoryPermission perm) = 0;
+};
+
 /// Central class that handles all memory operations and state.
 class Memory {
 public:
