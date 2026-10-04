@@ -511,6 +511,11 @@ struct Memory::Impl {
             return;
         }
 
+        if (mapping_observer) {
+            mapping_observer->MarkCached(vaddr, size, cached,
+                                         Settings::values.use_reactive_flushing.GetValue());
+        }
+
         if (current_page_table->fastmem_arena) {
             Common::MemoryPermission perm{};
             if (!Settings::values.use_reactive_flushing.GetValue() || !cached) {
@@ -923,6 +928,10 @@ Memory::~Memory() = default;
 
 void Memory::Reset() {
     impl = std::make_unique<Impl>(system);
+}
+
+GuestMappingObserver* Memory::GetMappingObserver() {
+    return impl->mapping_observer.get();
 }
 
 void Memory::SetCurrentPageTable(Kernel::KProcess& process) {

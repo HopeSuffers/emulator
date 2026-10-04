@@ -58,6 +58,7 @@ public:
     virtual void Map(VAddr va, PAddr pa, u64 size, Common::MemoryPermission perm) = 0;
     virtual void Unmap(VAddr va, u64 size) = 0;
     virtual void Protect(VAddr va, u64 size, Common::MemoryPermission perm) = 0;
+    virtual void MarkCached(VAddr va, u64 size, bool cached, bool reactive) = 0;
 };
 
 /// Central class that handles all memory operations and state.
@@ -83,6 +84,8 @@ public:
      * @param process The process to use the page table of.
      */
     void SetCurrentPageTable(Kernel::KProcess& process);
+
+    GuestMappingObserver* GetMappingObserver();
 
     /**
      * Maps an allocated buffer onto a region of the emulated process address space.

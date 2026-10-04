@@ -28,4 +28,11 @@ void FreeTable(const Table& table);
 
 u64* TableHost(u64 ipa);
 
+constexpr u64 KernelVa = 0xFFFF'FF80'0000'0000ULL;
+constexpr u64 ResumeStub = KernelVa + 0x1000;
+constexpr u64 ResumeFlushStub = KernelVa + 0x1004;
+constexpr u64 ResumeStubEnd = KernelVa + 0x2000;
+
+u64 KernelTtbr1();
+
 }

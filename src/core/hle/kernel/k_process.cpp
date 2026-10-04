@@ -22,6 +22,10 @@
 #ifdef HAS_NCE
 #include "core/arm/nce/arm_nce.h"
 #endif
+#ifdef HAS_HYPERVISOR
+#include "core/arm/hypervisor/arm_hypervisor.h"
+#include "core/arm/hypervisor/hv_address_space.h"
+#endif
 
 namespace Kernel {
 
@@ -1298,6 +1302,16 @@ void KProcess::InitializeInterfaces() {
     if (this->IsApplication() && Settings::IsNceEnabled()) {
         for (size_t i = 0; i < Core::Hardware::NUM_CPU_CORES; i++) {
             m_arm_interfaces[i] = std::make_unique<Core::ArmNce>(m_kernel.System(), true, i);
+        }
+    } else
+#endif
+#ifdef HAS_HYPERVISOR
+        if (auto* observer = this->GetMemory().GetMappingObserver();
+            this->IsApplication() && Settings::IsHypervisorEnabled() && observer) {
+        auto& address_space = static_cast<Core::Hypervisor::AddressSpace&>(*observer);
+        for (size_t i = 0; i < Core::Hardware::NUM_CPU_CORES; i++) {
+            m_arm_interfaces[i] = std::make_unique<Core::Hypervisor::ArmHypervisor>(
+                m_kernel.System(), this, address_space, i);
         }
     } else
 #endif

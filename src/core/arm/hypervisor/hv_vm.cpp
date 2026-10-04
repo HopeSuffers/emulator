@@ -22,6 +22,8 @@ namespace Core::Hypervisor {
 using namespace Common::Literals;
 
 constexpr u64 TableIpaBase = 0x5'0000'0000ULL;
+constexpr u64 KernelIpa = 0x4'C000'0000ULL;
+constexpr size_t KernelPageSize = 0x4000;
 constexpr size_t TableRegionSize = 1_GiB;
 
 namespace {
@@ -65,11 +67,7 @@ void SelectForProcess(bool is_64bit) {
     if (!is_64bit) {
         LOG_INFO(Core_ARM, "32-bit program, using Dynarmic instead of the hypervisor");
     }
-    const bool usable = is_64bit && IsAvailable();
-    if (usable) {
-        LOG_WARNING(Core_ARM, "Hypervisor page tables active, guest code still runs on Dynarmic");
-    }
-    Settings::SetHypervisorEnabled(usable);
+    Settings::SetHypervisorEnabled(is_64bit && IsAvailable());
 }
 
 bool MapDram(u8* backing, size_t size) {
@@ -133,6 +131,55 @@ u64* TableHost(u64 ipa) {
 void FreeTable(const Table& table) {
     std::scoped_lock lk{table_mutex};
     free_tables.push_back(table.ipa);
+}
+
+u64 KernelTtbr1() {
+    static std::once_flag once;
+    static u64 ttbr1 = 0;
+    std::call_once(once, [] {
+        auto* page = static_cast<u32*>(mmap(nullptr, KernelPageSize, PROT_READ | PROT_WRITE,
+                                            MAP_PRIVATE | MAP_ANONYMOUS, -1, 0));
+        if (page == MAP_FAILED) {
+            LOG_CRITICAL(Core_ARM, "Could not allocate the kernel page");
+            std::abort();
+        }
+        constexpr u32 Hvc = 0xD41FFFE2;
+        constexpr u32 Eret = 0xD69F03E0;
+        for (size_t vector = 0; vector < 16; vector++) {
+            page[vector * 0x20] = Hvc;
+            page[vector * 0x20 + 1] = Eret;
+        }
+        const u32 resume_flush[] = {
+            Eret,       // +0x1000
+            0xD5033A9F, // +0x1004 dsb ishst
+            0xD508831F, // tlbi vmalle1is
+            0xD508711F, // ic ialluis
+            0xD5033B9F, // dsb ish
+            0xD5033FDF, // isb
+            Eret,
+        };
+        std::memcpy(page + 0x1000 / 4, resume_flush, sizeof(resume_flush));
+        const hv_return_t result =
+            hv_vm_map(page, KernelIpa, KernelPageSize, HV_MEMORY_READ | HV_MEMORY_EXEC);
+        if (result != HV_SUCCESS) {
+            LOG_CRITICAL(Core_ARM, "hv_vm_map of the kernel page failed: {:#x}",
+                         static_cast<u32>(result));
+            std::abort();
+        }
+
+        const Table l1 = AllocateTable();
+        const Table l2 = AllocateTable();
+        const Table l3 = AllocateTable();
+        l1.host[(KernelVa >> 30) & 511] = l2.ipa | 3;
+        l2.host[(KernelVa >> 21) & 511] = l3.ipa | 3;
+        for (u64 i = 0; i < 2; i++) {
+            // EL1 read-only, EL0 no access, EL0 never executes.
+            l3.host[i] = (KernelIpa + i * 0x1000) | 3 | (1ULL << 10) | (3ULL << 8) |
+                         (2ULL << 6) | (1ULL << 54);
+        }
+        ttbr1 = l1.ipa;
+    });
+    return ttbr1;
 }
 
 }

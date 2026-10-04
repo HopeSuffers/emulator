@@ -3,12 +3,14 @@
 
 #pragma once
 
+#include <array>
 #include <atomic>
 #include <mutex>
 #include <optional>
 #include <vector>
 
 #include "core/arm/hypervisor/hv_vm.h"
+#include "core/hardware_properties.h"
 #include "core/memory.h"
 
 namespace Common {
@@ -29,24 +31,40 @@ public:
     void Map(VAddr va, PAddr pa, u64 size, Common::MemoryPermission perm) override;
     void Unmap(VAddr va, u64 size) override;
     void Protect(VAddr va, u64 size, Common::MemoryPermission perm) override;
+    void MarkCached(VAddr va, u64 size, bool cached, bool reactive) override;
+
+    bool IsTracked(VAddr va);
+    bool Permits(VAddr va, bool write);
+    void Untrack(VAddr va);
 
     u64 RootIpa() const {
         return root.ipa;
     }
 
-    bool TakeFlushRequest() {
-        return flush_pending.exchange(false, std::memory_order_acq_rel);
+    u64 FlushGeneration() const {
+        return flush_generation.load(std::memory_order_acquire);
+    }
+
+    void SetRunningVcpu(size_t core, u64 vcpu_plus_one) {
+        running_vcpus[core].store(vcpu_plus_one);
+    }
+
+    u64 RunningVcpu(size_t core) const {
+        return running_vcpus[core].load();
     }
 
 private:
     u64* GetLeaf(VAddr va, bool create);
+    void Update(u64* leaf, u64 new_leaf, bool& flush);
+    void RequestFlush();
     void Verify(VAddr va, u64 size);
 
     const Common::PageTable& page_table;
     Table root;
     std::vector<Table> tables;
     std::mutex mutex;
-    std::atomic<bool> flush_pending{false};
+    std::atomic<u64> flush_generation{0};
+    std::array<std::atomic<u64>, Core::Hardware::NUM_CPU_CORES> running_vcpus{};
     bool verify;
     u64 verify_failures = 0;
 };

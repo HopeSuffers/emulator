@@ -1299,6 +1299,8 @@ endif()
 
 if (HAS_HYPERVISOR)
     target_sources(core PRIVATE
+        arm/hypervisor/arm_hypervisor.cpp
+        arm/hypervisor/arm_hypervisor.h
         arm/hypervisor/hv_address_space.cpp
         arm/hypervisor/hv_address_space.h
         arm/hypervisor/hv_vm.cpp
