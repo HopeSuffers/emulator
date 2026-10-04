@@ -734,6 +734,7 @@ void BufferCache<P>::CommitAsyncFlushesHigh() {
         second_copy.src_offset = static_cast<size_t>(buffer.CpuAddr()) + copy.src_offset;
         const DAddr orig_device_addr = static_cast<DAddr>(second_copy.src_offset);
         async_downloads.Add(orig_device_addr, copy.size);
+        device_memory.MarkRegionReadBarrier(orig_device_addr, copy.size, true);
         MarkGpuUse(buffer, copy.src_offset, copy.size);
         runtime.CopyBuffer(download_staging.buffer, buffer, copies, false);
         normalized_copies.push_back(second_copy);
@@ -776,6 +777,7 @@ void BufferCache<P>::PopAsyncBuffers() {
         async_downloads.Subtract(device_addr, copy.size, [&](DAddr start, DAddr end) {
             gpu_modified_ranges.Subtract(start, end - start);
         });
+        device_memory.MarkRegionReadBarrier(device_addr, copy.size, false);
     }
     async_buffers_death_ring.emplace_back(*async_buffer);
     async_buffers.pop_front();

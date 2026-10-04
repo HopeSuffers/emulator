@@ -4,6 +4,7 @@
 #pragma once
 
 #include <atomic>
+#include <chrono>
 
 #include "core/arm/arm_interface.h"
 
@@ -68,6 +69,19 @@ private:
 
     std::atomic<bool> m_interrupt{false};
     std::atomic<bool> m_icache_flush{false};
+    struct ExitStats {
+        u64 svc{};
+        u64 sysreg{};
+        u64 abort{};
+        u64 canceled{};
+        u64 flush{};
+        u64 read_fault{};
+        u64 barrier{};
+    };
+    void CountExit(u64 ExitStats::* counter);
+
+    ExitStats m_stats{};
+    std::chrono::steady_clock::time_point m_stats_start{};
     u64 m_flush_generation{};
     u64 m_last_fault_page{};
     u32 m_fault_repeats{};

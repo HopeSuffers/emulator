@@ -1,8 +1,8 @@
 // SPDX-FileCopyrightText: Copyright 2026 citron Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
-#include <cstdlib>
 #include <algorithm>
+#include <cstdlib>
 #include <cstring>
 
 #include <Hypervisor/Hypervisor.h>
@@ -37,6 +37,8 @@ constexpr u32 EcSysReg = 0x18;
 constexpr u32 EcInstructionAbortLower = 0x20;
 constexpr u32 EcDataAbortLower = 0x24;
 constexpr u32 EcBrk64 = 0x3C;
+
+const bool StatsEnabled = std::getenv("CITRON_HV_STATS") != nullptr;
 
 u32 ExceptionClass(u64 esr) {
     return static_cast<u32>((esr >> 26) & 0x3F);
@@ -164,6 +166,28 @@ void ArmHypervisor::SaveState(Vcpu& vcpu, u64 pc, u64 pstate) {
     m_ctx.tpidr = vcpu.SysReg(HV_SYS_REG_TPIDR_EL0);
 }
 
+void ArmHypervisor::CountExit(u64 ExitStats::* counter) {
+    if (!StatsEnabled) {
+        return;
+    }
+    m_stats.*counter += 1;
+    const auto now = std::chrono::steady_clock::now();
+    const double seconds = std::chrono::duration<double>(now - m_stats_start).count();
+    if (seconds < 5.0) {
+        return;
+    }
+    if (m_stats_start.time_since_epoch().count() != 0) {
+        const auto rate = [seconds](u64 count) { return static_cast<double>(count) / seconds; };
+        LOG_INFO(Core_ARM, "HV core {} exits/s: svc {:.0f}, sysreg {:.0f}, abort {:.0f}, "
+                           "canceled {:.0f}, flush {:.0f}, read faults {:.0f}, barrier {:.0f}",
+                 m_core_index, rate(m_stats.svc), rate(m_stats.sysreg), rate(m_stats.abort),
+                 rate(m_stats.canceled), rate(m_stats.flush), rate(m_stats.read_fault),
+                 rate(m_stats.barrier));
+    }
+    m_stats = {};
+    m_stats_start = now;
+}
+
 bool ArmHypervisor::TakeFlush() {
     const u64 generation = m_address_space.FlushGeneration();
     bool flush = m_icache_flush.exchange(false);
@@ -176,6 +200,9 @@ bool ArmHypervisor::TakeFlush() {
 
 void ArmHypervisor::Resume(Vcpu& vcpu, u64 pc, u64 spsr, bool flush) {
     flush |= TakeFlush();
+    if (flush) {
+        CountExit(&ExitStats::flush);
+    }
     vcpu.SetSysReg(HV_SYS_REG_ELR_EL1, pc);
     vcpu.SetSysReg(HV_SYS_REG_SPSR_EL1, spsr);
     vcpu.SetReg(HV_REG_PC, flush ? ResumeFlushStub : ResumeStub);
@@ -207,6 +234,16 @@ void ArmHypervisor::HandleSystemRegister(Vcpu& vcpu, u64 esr) {
 ArmHypervisor::AbortAction ArmHypervisor::HandleDataAbort(u64 far, u64 elr, u64 esr) {
     const u64 page = far & ~Memory::CITRON_PAGEMASK;
     const bool is_write = (esr & (1ULL << 6)) != 0;
+    if (m_address_space.WaitReadBarrier(page)) {
+        CountExit(&ExitStats::barrier);
+        return AbortAction::Retry;
+    }
+    if (!is_write) {
+        CountExit(&ExitStats::read_fault);
+        if (m_address_space.Permits(page, false)) {
+            return AbortAction::Retry;
+        }
+    }
     if (page == m_last_fault_page) {
         if (++m_fault_repeats > 1000) {
             LOG_WARNING(Core_ARM, "Page {:#x} keeps faulting at pc={:#x}, untracking it", page,
@@ -249,6 +286,7 @@ HaltReason ArmHypervisor::RunThread(Kernel::KThread* thread) {
         const hv_vcpu_exit_t& exit = *vcpu.exit;
 
         if (exit.reason == HV_EXIT_REASON_CANCELED) {
+            CountExit(&ExitStats::canceled);
             const u64 cpsr = vcpu.Reg(HV_REG_CPSR);
             const u64 pc = vcpu.Reg(HV_REG_PC);
             if ((cpsr & 0xF) == 0) {
@@ -296,15 +334,18 @@ HaltReason ArmHypervisor::RunThread(Kernel::KThread* thread) {
 
         switch (ExceptionClass(esr)) {
         case EcSvc64:
+            CountExit(&ExitStats::svc);
             m_svc = static_cast<u32>(esr & 0xFFFF);
             SaveState(vcpu, elr, spsr);
             hr = HaltReason::SupervisorCall;
             break;
         case EcSysReg:
+            CountExit(&ExitStats::sysreg);
             HandleSystemRegister(vcpu, esr);
             next_pc = elr + 4;
             break;
         case EcDataAbortLower:
+            CountExit(&ExitStats::abort);
             switch (HandleDataAbort(vcpu.SysReg(HV_SYS_REG_FAR_EL1), elr, esr)) {
             case AbortAction::Retry:
                 flush_on_resume = true;

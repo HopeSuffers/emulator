@@ -1,6 +1,8 @@
 // SPDX-FileCopyrightText: Copyright 2026 citron Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
+#include <chrono>
+#include <condition_variable>
 #include <cstdlib>
 
 #include <Hypervisor/Hypervisor.h>
@@ -41,6 +43,8 @@ constexpr u64 SwPermMask = 7ULL << SwPermShift;
 constexpr u64 SwNoWrite = 1ULL << 59;
 constexpr u64 SwNoRead = 1ULL << 60;
 constexpr u64 SwTracked = SwNoWrite | SwNoRead;
+constexpr u64 SwReadBarrier = 1ULL << 61;
+constexpr u64 SwState = SwTracked | SwReadBarrier;
 
 u64 Load(const u64* entry) {
     return __atomic_load_n(entry, __ATOMIC_ACQUIRE);
@@ -60,8 +64,8 @@ bool Has(MemoryPermission perm, MemoryPermission flag) {
 
 u64 MakeLeaf(PAddr pa, MemoryPermission perm, u64 tracked = 0) {
     u64 leaf = (pa & AddressMask) | SwPresent | (static_cast<u64>(perm) << SwPermShift) | tracked;
-    const bool r = Has(perm, MemoryPermission::Read) && (tracked & SwNoRead) == 0;
-    const bool w = Has(perm, MemoryPermission::Write) && (tracked & SwTracked) == 0;
+    const bool r = Has(perm, MemoryPermission::Read) && (tracked & (SwNoRead | SwReadBarrier)) == 0;
+    const bool w = Has(perm, MemoryPermission::Write) && (tracked & SwState) == 0;
     const bool x = Has(perm, MemoryPermission::Execute);
     if (!r && !w && !x) {
         return leaf;
@@ -85,10 +89,10 @@ u32 EffectivePerm(u64 leaf) {
         return 0;
     }
     u32 perm = static_cast<u32>(PermOf(leaf));
-    if (leaf & SwNoRead) {
+    if (leaf & (SwNoRead | SwReadBarrier)) {
         perm &= ~static_cast<u32>(MemoryPermission::Read);
     }
-    if (leaf & SwTracked) {
+    if (leaf & SwState) {
         perm &= ~static_cast<u32>(MemoryPermission::Write);
     }
     return perm;
@@ -191,6 +195,7 @@ void AddressSpace::Unmap(VAddr va, u64 size) {
             if (u64* leaf = GetLeaf(va + offset, false)) {
                 Update(leaf, 0, flush);
             }
+            barrier_counts.erase((va + offset) & ~(PageSize - 1));
         }
         if (verify) {
             Verify(va, size);
@@ -212,7 +217,7 @@ void AddressSpace::Protect(VAddr va, u64 size, MemoryPermission perm) {
             }
             const u64 old_leaf = Load(leaf);
             if (old_leaf & SwPresent) {
-                Update(leaf, MakeLeaf(old_leaf & AddressMask, perm, old_leaf & SwTracked), flush);
+                Update(leaf, MakeLeaf(old_leaf & AddressMask, perm, old_leaf & SwState), flush);
             }
         }
         if (verify) {
@@ -225,7 +230,7 @@ void AddressSpace::Protect(VAddr va, u64 size, MemoryPermission perm) {
 }
 
 void AddressSpace::MarkCached(VAddr va, u64 size, bool cached, bool reactive) {
-    const u64 tracked = cached ? (SwNoWrite | (reactive ? SwNoRead : 0)) : 0;
+    const u64 tracked = cached ? SwNoWrite : 0;
     const VAddr begin = va & ~(PageSize - 1);
     const VAddr end = va + size;
     bool flush = false;
@@ -238,13 +243,73 @@ void AddressSpace::MarkCached(VAddr va, u64 size, bool cached, bool reactive) {
             }
             const u64 old_leaf = Load(leaf);
             if ((old_leaf & SwPresent) && (old_leaf & SwTracked) != tracked) {
-                Update(leaf, MakeLeaf(old_leaf & AddressMask, PermOf(old_leaf), tracked), flush);
+                Update(leaf,
+                       MakeLeaf(old_leaf & AddressMask, PermOf(old_leaf),
+                                tracked | (old_leaf & SwReadBarrier)),
+                       flush);
             }
         }
     }
     if (flush) {
         RequestFlush();
     }
+}
+
+void AddressSpace::MarkReadBarrier(VAddr va, u64 size, bool enable) {
+    const VAddr begin = va & ~(PageSize - 1);
+    const VAddr end = va + size;
+    bool flush = false;
+    bool released = false;
+    {
+        std::scoped_lock lk{mutex};
+        for (VAddr addr = begin; addr < end; addr += PageSize) {
+            if (enable) {
+                if (barrier_counts[addr]++ != 0) {
+                    continue;
+                }
+            } else {
+                const auto it = barrier_counts.find(addr);
+                if (it == barrier_counts.end() || --it->second != 0) {
+                    continue;
+                }
+                barrier_counts.erase(it);
+                released = true;
+            }
+            u64* leaf = GetLeaf(addr, false);
+            if (!leaf) {
+                continue;
+            }
+            const u64 old_leaf = Load(leaf);
+            if (old_leaf & SwPresent) {
+                const u64 state = (old_leaf & SwTracked) | (enable ? SwReadBarrier : 0);
+                Update(leaf, MakeLeaf(old_leaf & AddressMask, PermOf(old_leaf), state), flush);
+            }
+        }
+    }
+    if (flush) {
+        RequestFlush();
+    }
+    if (released) {
+        barrier_cv.notify_all();
+    }
+}
+
+bool AddressSpace::WaitReadBarrier(VAddr va) {
+    const VAddr page = va & ~(PageSize - 1);
+    std::unique_lock lk{mutex};
+    if (!barrier_counts.contains(page)) {
+        return false;
+    }
+    if (!barrier_cv.wait_for(lk, std::chrono::milliseconds(250),
+                             [&] { return !barrier_counts.contains(page); })) {
+        LOG_WARNING(Core_ARM, "Read barrier on {:#x} timed out, dropping it", page);
+        barrier_counts.erase(page);
+        if (u64* leaf = GetLeaf(page, false); leaf && (Load(leaf) & SwPresent)) {
+            const u64 old_leaf = Load(leaf);
+            Store(leaf, MakeLeaf(old_leaf & AddressMask, PermOf(old_leaf), old_leaf & SwTracked));
+        }
+    }
+    return true;
 }
 
 bool AddressSpace::IsTracked(VAddr va) {
@@ -267,7 +332,7 @@ void AddressSpace::Untrack(VAddr va) {
     std::scoped_lock lk{mutex};
     if (u64* leaf = GetLeaf(va, false); leaf && (Load(leaf) & SwPresent)) {
         const u64 old_leaf = Load(leaf);
-        Store(leaf, MakeLeaf(old_leaf & AddressMask, PermOf(old_leaf)));
+        Store(leaf, MakeLeaf(old_leaf & AddressMask, PermOf(old_leaf), old_leaf & SwReadBarrier));
     }
 }
 

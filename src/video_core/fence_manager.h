@@ -71,7 +71,10 @@ public:
     }
 
     void SignalFence(std::function<void()>&& func) {
-        const bool delay_fence = Settings::IsGPULevelNormal();
+        SignalFenceImpl(std::move(func), Settings::IsGPULevelNormal());
+    }
+
+    void SignalFenceImpl(std::function<void()>&& func, bool delay_fence) {
         if constexpr (!can_async_check) {
             TryReleasePendingFences<false>();
         }
@@ -103,7 +106,10 @@ public:
     void SignalSyncPoint(u32 value) {
         syncpoint_manager.IncrementGuest(value);
         std::function<void()> func([this, value] { syncpoint_manager.IncrementHost(value); });
-        SignalFence(std::move(func));
+        const bool delay_fence = Settings::IsGPULevelNormal() &&
+                                 (Settings::IsGPULevelHigh() ||
+                                  !buffer_cache.SupportsGuestReadBarriers());
+        SignalFenceImpl(std::move(func), delay_fence);
     }
 
     void WaitPendingFences([[maybe_unused]] bool force) {

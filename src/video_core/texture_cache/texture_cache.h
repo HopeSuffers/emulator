@@ -871,7 +871,23 @@ void TextureCache<P>::CommitAsyncFlushes() {
             uncommitted_downloads.clear();
             async_buffers.emplace_back(std::move(uncommitted_async_buffers));
             uncommitted_async_buffers.clear();
+            committed_read_barriers.emplace_back();
             return;
+        }
+        auto& read_barriers = committed_read_barriers.emplace_back();
+        for (const PendingDownload& download_info : download_ids) {
+            if (download_info.is_swizzle) {
+                const ImageBase& image = slot_images[download_info.object_id];
+                read_barriers.emplace_back(image.cpu_addr, image.guest_size_bytes);
+            } else {
+                const BufferDownload& buffer_info = slot_buffer_downloads[download_info.object_id];
+                if (const auto addr = gpu_memory->GpuToCpuAddress(buffer_info.address)) {
+                    read_barriers.emplace_back(*addr, buffer_info.size);
+                }
+            }
+        }
+        for (const auto& [addr, size] : read_barriers) {
+            device_memory.MarkRegionReadBarrier(addr, size, true);
         }
         size_t total_size_bytes = 0;
         size_t last_async_buffer_id = uncommitted_async_buffers.size();
@@ -915,6 +931,7 @@ void TextureCache<P>::PopAsyncFlushes() {
         if (download_ids.empty()) {
             committed_downloads.pop_front();
             async_buffers.pop_front();
+            committed_read_barriers.pop_front();
             return;
         }
         auto download_map = std::move(async_buffers.front());
@@ -941,6 +958,10 @@ void TextureCache<P>::PopAsyncFlushes() {
         for (auto& download_buffer : download_map) {
             async_buffers_death_ring.emplace_back(download_buffer);
         }
+        for (const auto& [addr, size] : committed_read_barriers.front()) {
+            device_memory.MarkRegionReadBarrier(addr, size, false);
+        }
+        committed_read_barriers.pop_front();
         committed_downloads.pop_front();
         async_buffers.pop_front();
     } else {

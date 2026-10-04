@@ -59,6 +59,10 @@ public:
     virtual void Unmap(VAddr va, u64 size) = 0;
     virtual void Protect(VAddr va, u64 size, Common::MemoryPermission perm) = 0;
     virtual void MarkCached(VAddr va, u64 size, bool cached, bool reactive) = 0;
+    virtual void MarkReadBarrier(VAddr va, u64 size, bool enable) {}
+    virtual bool SupportsReadBarriers() const {
+        return false;
+    }
 };
 
 /// Central class that handles all memory operations and state.
@@ -489,6 +493,10 @@ public:
      *               marked as cached or uncached.
      */
     void RasterizerMarkRegionCached(Common::ProcessAddress vaddr, u64 size, bool cached);
+
+    void RasterizerMarkRegionReadBarrier(Common::ProcessAddress vaddr, u64 size, bool enable);
+
+    bool SupportsReadBarriers() const;
 
     /**
      * Marks each page within the specified address range as debug or non-debug.

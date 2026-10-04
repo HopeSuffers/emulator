@@ -5,8 +5,10 @@
 
 #include <array>
 #include <atomic>
+#include <condition_variable>
 #include <mutex>
 #include <optional>
+#include <unordered_map>
 #include <vector>
 
 #include "core/arm/hypervisor/hv_vm.h"
@@ -32,6 +34,12 @@ public:
     void Unmap(VAddr va, u64 size) override;
     void Protect(VAddr va, u64 size, Common::MemoryPermission perm) override;
     void MarkCached(VAddr va, u64 size, bool cached, bool reactive) override;
+    void MarkReadBarrier(VAddr va, u64 size, bool enable) override;
+    bool SupportsReadBarriers() const override {
+        return true;
+    }
+
+    bool WaitReadBarrier(VAddr va);
 
     bool IsTracked(VAddr va);
     bool Permits(VAddr va, bool write);
@@ -63,6 +71,8 @@ private:
     Table root;
     std::vector<Table> tables;
     std::mutex mutex;
+    std::condition_variable barrier_cv;
+    std::unordered_map<VAddr, u32> barrier_counts;
     std::atomic<u64> flush_generation{0};
     std::array<std::atomic<u64>, Core::Hardware::NUM_CPU_CORES> running_vcpus{};
     bool verify;

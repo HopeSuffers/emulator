@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright 2023 yuzu Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
+#include <algorithm>
 #include <atomic>
 #include <limits>
 #include <memory>
@@ -553,6 +554,46 @@ template <typename Traits>
 void DeviceMemoryManager<Traits>::UnregisterProcess(Asid asid) {
     registered_processes[asid.id] = nullptr;
     id_pool.push_front(asid.id);
+}
+
+template <typename Traits>
+void DeviceMemoryManager<Traits>::MarkRegionReadBarrier(DAddr addr, size_t size, bool enable) {
+    if (addr < Memory::CITRON_PAGESIZE || size == 0) {
+        return;
+    }
+    Memory::Memory* run_memory = nullptr;
+    VAddr run_begin = 0;
+    size_t run_bytes = 0;
+    const auto release_run = [&] {
+        if (run_memory != nullptr && run_bytes > 0) {
+            DeviceMethods::MarkRegionReadBarrier(run_memory, run_begin, run_bytes, enable);
+        }
+        run_bytes = 0;
+    };
+    const size_t page_end = Common::DivCeil(addr + size, Memory::CITRON_PAGESIZE);
+    for (size_t page = addr >> Memory::CITRON_PAGEBITS; page != page_end; ++page) {
+        const auto [asid, vaddr] = ExtractCPUBacking(page);
+        Memory::Memory* const memory =
+            asid.id < registered_processes.size() ? registered_processes[asid.id] : nullptr;
+        if (memory == nullptr || (vaddr >> Memory::CITRON_PAGEBITS) == 0) {
+            release_run();
+            continue;
+        }
+        if (memory != run_memory || vaddr != run_begin + run_bytes) {
+            release_run();
+            run_memory = memory;
+            run_begin = vaddr;
+        }
+        run_bytes += Memory::CITRON_PAGESIZE;
+    }
+    release_run();
+}
+
+template <typename Traits>
+bool DeviceMemoryManager<Traits>::SupportsReadBarriers() const {
+    return std::ranges::any_of(registered_processes, [](const Memory::Memory* memory) {
+        return memory != nullptr && memory->SupportsReadBarriers();
+    });
 }
 
 template <typename Traits>

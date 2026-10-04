@@ -496,6 +496,7 @@ public:
 
     std::vector<PendingDownload> uncommitted_downloads;
     std::deque<std::vector<PendingDownload>> committed_downloads;
+    std::deque<std::vector<std::pair<DAddr, size_t>>> committed_read_barriers;
     std::vector<AsyncBuffer> uncommitted_async_buffers;
     std::deque<std::vector<AsyncBuffer>> async_buffers;
     std::deque<AsyncBuffer> async_buffers_death_ring;

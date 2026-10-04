@@ -1130,6 +1130,16 @@ void Memory::RasterizerMarkRegionCached(Common::ProcessAddress vaddr, u64 size, 
     impl->RasterizerMarkRegionCached(GetInteger(vaddr), size, cached);
 }
 
+void Memory::RasterizerMarkRegionReadBarrier(Common::ProcessAddress vaddr, u64 size, bool enable) {
+    if (impl->mapping_observer) {
+        impl->mapping_observer->MarkReadBarrier(GetInteger(vaddr), size, enable);
+    }
+}
+
+bool Memory::SupportsReadBarriers() const {
+    return impl->mapping_observer && impl->mapping_observer->SupportsReadBarriers();
+}
+
 void Memory::MarkRegionDebug(Common::ProcessAddress vaddr, u64 size, bool debug) {
     impl->MarkRegionDebug(GetInteger(vaddr), size, debug);
 }

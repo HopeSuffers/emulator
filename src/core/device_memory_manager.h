@@ -132,6 +132,9 @@ public:
 
     void UpdatePagesCachedCount(DAddr addr, size_t size, s32 delta);
 
+    void MarkRegionReadBarrier(DAddr addr, size_t size, bool enable);
+    bool SupportsReadBarriers() const;
+
     static constexpr size_t AS_BITS = Traits::device_virtual_bits;
 
 private:

@@ -209,6 +209,10 @@ class BufferCache : public VideoCommon::ChannelSetupCaches<BufferCacheChannelInf
 public:
     explicit BufferCache(Tegra::MaxwellDeviceMemoryManager& device_memory_, Runtime& runtime_);
 
+    [[nodiscard]] bool SupportsGuestReadBarriers() const {
+        return device_memory.SupportsReadBarriers();
+    }
+
     ~BufferCache();
 
     void TickFrame(u64 cache_usage, u64 cache_target, std::span<const HeapMemoryBudget> heaps);
