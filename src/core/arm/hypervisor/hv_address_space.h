@@ -35,11 +35,15 @@ public:
     void Protect(VAddr va, u64 size, Common::MemoryPermission perm) override;
     void MarkCached(VAddr va, u64 size, bool cached, bool reactive) override;
     void MarkReadBarrier(VAddr va, u64 size, bool enable) override;
+    void MarkGpuModified(VAddr va, u64 size) override;
     bool SupportsReadBarriers() const override {
         return true;
     }
 
     bool WaitReadBarrier(VAddr va);
+
+    std::optional<u64> GpuModifiedEpoch(VAddr va);
+    bool ClearGpuModified(VAddr va, u64 epoch, bool force);
 
     bool IsTracked(VAddr va);
     bool Permits(VAddr va, bool write);
@@ -74,6 +78,7 @@ private:
     std::condition_variable barrier_cv;
     std::unordered_map<VAddr, u32> barrier_counts;
     std::atomic<u64> flush_generation{0};
+    std::unordered_map<VAddr, u64> gpu_modified_epochs;
     std::array<std::atomic<u64>, Core::Hardware::NUM_CPU_CORES> running_vcpus{};
     bool verify;
     u64 verify_failures = 0;

@@ -557,7 +557,8 @@ void DeviceMemoryManager<Traits>::UnregisterProcess(Asid asid) {
 }
 
 template <typename Traits>
-void DeviceMemoryManager<Traits>::MarkRegionReadBarrier(DAddr addr, size_t size, bool enable) {
+template <typename Func>
+void DeviceMemoryManager<Traits>::ForEachBackingRun(DAddr addr, size_t size, Func&& func) {
     if (addr < Memory::CITRON_PAGESIZE || size == 0) {
         return;
     }
@@ -566,7 +567,7 @@ void DeviceMemoryManager<Traits>::MarkRegionReadBarrier(DAddr addr, size_t size,
     size_t run_bytes = 0;
     const auto release_run = [&] {
         if (run_memory != nullptr && run_bytes > 0) {
-            DeviceMethods::MarkRegionReadBarrier(run_memory, run_begin, run_bytes, enable);
+            func(run_memory, run_begin, run_bytes);
         }
         run_bytes = 0;
     };
@@ -587,6 +588,20 @@ void DeviceMemoryManager<Traits>::MarkRegionReadBarrier(DAddr addr, size_t size,
         run_bytes += Memory::CITRON_PAGESIZE;
     }
     release_run();
+}
+
+template <typename Traits>
+void DeviceMemoryManager<Traits>::MarkRegionReadBarrier(DAddr addr, size_t size, bool enable) {
+    ForEachBackingRun(addr, size, [enable](Memory::Memory* memory, VAddr vaddr, size_t bytes) {
+        DeviceMethods::MarkRegionReadBarrier(memory, vaddr, bytes, enable);
+    });
+}
+
+template <typename Traits>
+void DeviceMemoryManager<Traits>::MarkRegionGpuModified(DAddr addr, size_t size) {
+    ForEachBackingRun(addr, size, [](Memory::Memory* memory, VAddr vaddr, size_t bytes) {
+        DeviceMethods::MarkRegionGpuModified(memory, vaddr, bytes);
+    });
 }
 
 template <typename Traits>

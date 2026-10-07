@@ -234,6 +234,15 @@ void ArmHypervisor::HandleSystemRegister(Vcpu& vcpu, u64 esr) {
 ArmHypervisor::AbortAction ArmHypervisor::HandleDataAbort(u64 far, u64 elr, u64 esr) {
     const u64 page = far & ~Memory::CITRON_PAGEMASK;
     const bool is_write = (esr & (1ULL << 6)) != 0;
+    if (const auto epoch = m_address_space.GpuModifiedEpoch(page)) {
+        m_process->GetMemory().FlushNCE(page, Memory::CITRON_PAGESIZE);
+        m_gpu_fault_repeats = page == m_gpu_fault_page ? m_gpu_fault_repeats + 1 : 0;
+        m_gpu_fault_page = page;
+        if (m_address_space.ClearGpuModified(page, *epoch, m_gpu_fault_repeats >= 4)) {
+            m_gpu_fault_page = 0;
+        }
+        return AbortAction::Retry;
+    }
     if (m_address_space.WaitReadBarrier(page)) {
         CountExit(&ExitStats::barrier);
         return AbortAction::Retry;

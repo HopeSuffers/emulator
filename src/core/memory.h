@@ -60,6 +60,7 @@ public:
     virtual void Protect(VAddr va, u64 size, Common::MemoryPermission perm) = 0;
     virtual void MarkCached(VAddr va, u64 size, bool cached, bool reactive) = 0;
     virtual void MarkReadBarrier(VAddr va, u64 size, bool enable) {}
+    virtual void MarkGpuModified(VAddr va, u64 size) {}
     virtual bool SupportsReadBarriers() const {
         return false;
     }
@@ -496,6 +497,8 @@ public:
 
     void RasterizerMarkRegionReadBarrier(Common::ProcessAddress vaddr, u64 size, bool enable);
 
+    void RasterizerMarkRegionGpuModified(Common::ProcessAddress vaddr, u64 size);
+
     bool SupportsReadBarriers() const;
 
     /**
@@ -512,6 +515,8 @@ public:
     void SetGPUDirtyManagers(std::span<Core::GPUDirtyMemoryManager> managers);
 
     bool InvalidateNCE(Common::ProcessAddress vaddr, size_t size);
+
+    void FlushNCE(Common::ProcessAddress vaddr, size_t size);
 
     bool InvalidateSeparateHeap(void* fault_address);
 

@@ -1136,6 +1136,12 @@ void Memory::RasterizerMarkRegionReadBarrier(Common::ProcessAddress vaddr, u64 s
     }
 }
 
+void Memory::RasterizerMarkRegionGpuModified(Common::ProcessAddress vaddr, u64 size) {
+    if (impl->mapping_observer) {
+        impl->mapping_observer->MarkGpuModified(GetInteger(vaddr), size);
+    }
+}
+
 bool Memory::SupportsReadBarriers() const {
     return impl->mapping_observer && impl->mapping_observer->SupportsReadBarriers();
 }
@@ -1160,6 +1166,11 @@ bool Memory::InvalidateNCE(Common::ProcessAddress vaddr, size_t size) {
         impl->InvalidateGPUMemory(ptr, size);
     }
     return mapped && ptr != nullptr;
+}
+
+void Memory::FlushNCE(Common::ProcessAddress vaddr, size_t size) {
+    impl->rasterizer_read_areas[system.GetCurrentHostThreadID()] = {};
+    impl->HandleRasterizerDownload(GetInteger(vaddr), size);
 }
 
 bool Memory::InvalidateSeparateHeap(void* fault_address) {

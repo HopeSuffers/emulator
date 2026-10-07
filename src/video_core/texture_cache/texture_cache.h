@@ -597,6 +597,7 @@ void TextureCache<P>::WriteMemory(DAddr cpu_addr, size_t size) {
             return;
         }
         image.flags |= ImageFlagBits::CpuModified;
+        image.flags &= ~ImageFlagBits::CpuReadProtected;
         if (True(image.flags & ImageFlagBits::Tracked)) {
             UntrackImage(image, image_id);
         }
@@ -610,7 +611,7 @@ void TextureCache<P>::DownloadMemory(DAddr cpu_addr, size_t size) {
         if (!image.IsSafeDownload()) {
             return;
         }
-        image.flags &= ~ImageFlagBits::GpuModified;
+        image.flags &= ~(ImageFlagBits::GpuModified | ImageFlagBits::CpuReadProtected);
         images.push_back(image_id);
     });
     if (images.empty()) {
@@ -2537,6 +2538,10 @@ void TextureCache<P>::RemoveFramebuffers(std::span<const ImageViewId> removed_vi
 
 template <class P>
 void TextureCache<P>::MarkModification(ImageBase& image) noexcept {
+    if (False(image.flags & ImageFlagBits::CpuReadProtected)) {
+        image.flags |= ImageFlagBits::CpuReadProtected;
+        device_memory.MarkRegionGpuModified(image.cpu_addr, image.cpu_addr_end - image.cpu_addr);
+    }
     image.flags |= ImageFlagBits::GpuModified;
     image.modification_tick = ++modification_tick;
 }

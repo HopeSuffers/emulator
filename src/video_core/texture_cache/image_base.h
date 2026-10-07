@@ -42,6 +42,7 @@ enum class ImageFlagBits : u32 {
 
     AsynchronousDecode = 1 << 16,
     IsDecoding = 1 << 17, ///< Is currently being decoded asynchronously.
+    CpuReadProtected = 1 << 18, ///< Guest CPU accesses fault until the image is downloaded
 };
 DECLARE_ENUM_FLAG_OPERATORS(ImageFlagBits)
 

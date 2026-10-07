@@ -133,11 +133,15 @@ public:
     void UpdatePagesCachedCount(DAddr addr, size_t size, s32 delta);
 
     void MarkRegionReadBarrier(DAddr addr, size_t size, bool enable);
+    void MarkRegionGpuModified(DAddr addr, size_t size);
     bool SupportsReadBarriers() const;
 
     static constexpr size_t AS_BITS = Traits::device_virtual_bits;
 
 private:
+    template <typename Func>
+    void ForEachBackingRun(DAddr addr, size_t size, Func&& func);
+
     static constexpr size_t device_virtual_bits = Traits::device_virtual_bits;
     static constexpr size_t device_as_size = 1ULL << device_virtual_bits;
     static constexpr size_t physical_min_bits = 32;  // 4GB

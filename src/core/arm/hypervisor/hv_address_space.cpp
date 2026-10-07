@@ -44,7 +44,9 @@ constexpr u64 SwNoWrite = 1ULL << 59;
 constexpr u64 SwNoRead = 1ULL << 60;
 constexpr u64 SwTracked = SwNoWrite | SwNoRead;
 constexpr u64 SwReadBarrier = 1ULL << 61;
-constexpr u64 SwState = SwTracked | SwReadBarrier;
+constexpr u64 SwGpuModified = 1ULL << 62;
+constexpr u64 SwNoAccess = SwNoRead | SwReadBarrier | SwGpuModified;
+constexpr u64 SwState = SwTracked | SwReadBarrier | SwGpuModified;
 
 u64 Load(const u64* entry) {
     return __atomic_load_n(entry, __ATOMIC_ACQUIRE);
@@ -64,7 +66,7 @@ bool Has(MemoryPermission perm, MemoryPermission flag) {
 
 u64 MakeLeaf(PAddr pa, MemoryPermission perm, u64 tracked = 0) {
     u64 leaf = (pa & AddressMask) | SwPresent | (static_cast<u64>(perm) << SwPermShift) | tracked;
-    const bool r = Has(perm, MemoryPermission::Read) && (tracked & (SwNoRead | SwReadBarrier)) == 0;
+    const bool r = Has(perm, MemoryPermission::Read) && (tracked & SwNoAccess) == 0;
     const bool w = Has(perm, MemoryPermission::Write) && (tracked & SwState) == 0;
     const bool x = Has(perm, MemoryPermission::Execute);
     if (!r && !w && !x) {
@@ -89,7 +91,7 @@ u32 EffectivePerm(u64 leaf) {
         return 0;
     }
     u32 perm = static_cast<u32>(PermOf(leaf));
-    if (leaf & (SwNoRead | SwReadBarrier)) {
+    if (leaf & SwNoAccess) {
         perm &= ~static_cast<u32>(MemoryPermission::Read);
     }
     if (leaf & SwState) {
@@ -177,6 +179,7 @@ void AddressSpace::Map(VAddr va, PAddr pa, u64 size, MemoryPermission perm) {
         std::scoped_lock lk{mutex};
         for (u64 offset = 0; offset < size; offset += PageSize) {
             Update(GetLeaf(va + offset, true), MakeLeaf(pa + offset, perm), flush);
+            gpu_modified_epochs.erase(va + offset);
         }
         if (verify) {
             Verify(va, size);
@@ -196,6 +199,7 @@ void AddressSpace::Unmap(VAddr va, u64 size) {
                 Update(leaf, 0, flush);
             }
             barrier_counts.erase((va + offset) & ~(PageSize - 1));
+            gpu_modified_epochs.erase((va + offset) & ~(PageSize - 1));
         }
         if (verify) {
             Verify(va, size);
@@ -245,7 +249,7 @@ void AddressSpace::MarkCached(VAddr va, u64 size, bool cached, bool reactive) {
             if ((old_leaf & SwPresent) && (old_leaf & SwTracked) != tracked) {
                 Update(leaf,
                        MakeLeaf(old_leaf & AddressMask, PermOf(old_leaf),
-                                tracked | (old_leaf & SwReadBarrier)),
+                                tracked | (old_leaf & (SwReadBarrier | SwGpuModified))),
                        flush);
             }
         }
@@ -281,7 +285,8 @@ void AddressSpace::MarkReadBarrier(VAddr va, u64 size, bool enable) {
             }
             const u64 old_leaf = Load(leaf);
             if (old_leaf & SwPresent) {
-                const u64 state = (old_leaf & SwTracked) | (enable ? SwReadBarrier : 0);
+                const u64 state =
+                    (old_leaf & (SwTracked | SwGpuModified)) | (enable ? SwReadBarrier : 0);
                 Update(leaf, MakeLeaf(old_leaf & AddressMask, PermOf(old_leaf), state), flush);
             }
         }
@@ -306,8 +311,75 @@ bool AddressSpace::WaitReadBarrier(VAddr va) {
         barrier_counts.erase(page);
         if (u64* leaf = GetLeaf(page, false); leaf && (Load(leaf) & SwPresent)) {
             const u64 old_leaf = Load(leaf);
-            Store(leaf, MakeLeaf(old_leaf & AddressMask, PermOf(old_leaf), old_leaf & SwTracked));
+            Store(leaf, MakeLeaf(old_leaf & AddressMask, PermOf(old_leaf),
+                                 old_leaf & (SwTracked | SwGpuModified)));
         }
+    }
+    return true;
+}
+
+void AddressSpace::MarkGpuModified(VAddr va, u64 size) {
+    const VAddr begin = va & ~(PageSize - 1);
+    const VAddr end = va + size;
+    bool flush = false;
+    {
+        std::scoped_lock lk{mutex};
+        for (VAddr addr = begin; addr < end; addr += PageSize) {
+            u64* leaf = GetLeaf(addr, false);
+            if (!leaf) {
+                continue;
+            }
+            const u64 old_leaf = Load(leaf);
+            if (!(old_leaf & SwPresent)) {
+                continue;
+            }
+            ++gpu_modified_epochs[addr];
+            if (!(old_leaf & SwGpuModified)) {
+                Update(leaf,
+                       MakeLeaf(old_leaf & AddressMask, PermOf(old_leaf),
+                                (old_leaf & SwState) | SwGpuModified),
+                       flush);
+            }
+        }
+    }
+    if (flush) {
+        RequestFlush();
+    }
+}
+
+std::optional<u64> AddressSpace::GpuModifiedEpoch(VAddr va) {
+    const VAddr page = va & ~(PageSize - 1);
+    std::scoped_lock lk{mutex};
+    const u64* leaf = GetLeaf(page, false);
+    if (!leaf || !(Load(leaf) & SwGpuModified)) {
+        return std::nullopt;
+    }
+    const auto it = gpu_modified_epochs.find(page);
+    return it == gpu_modified_epochs.end() ? 0 : it->second;
+}
+
+bool AddressSpace::ClearGpuModified(VAddr va, u64 epoch, bool force) {
+    const VAddr page = va & ~(PageSize - 1);
+    bool flush = false;
+    {
+        std::scoped_lock lk{mutex};
+        const auto it = gpu_modified_epochs.find(page);
+        if (it != gpu_modified_epochs.end()) {
+            if (it->second != epoch && !force) {
+                return false;
+            }
+            gpu_modified_epochs.erase(it);
+        }
+        if (u64* leaf = GetLeaf(page, false); leaf && (Load(leaf) & SwGpuModified)) {
+            const u64 old_leaf = Load(leaf);
+            Update(leaf,
+                   MakeLeaf(old_leaf & AddressMask, PermOf(old_leaf),
+                            old_leaf & SwState & ~SwGpuModified),
+                   flush);
+        }
+    }
+    if (flush) {
+        RequestFlush();
     }
     return true;
 }

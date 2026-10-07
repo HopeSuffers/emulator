@@ -85,6 +85,8 @@ private:
     u64 m_flush_generation{};
     u64 m_last_fault_page{};
     u32 m_fault_repeats{};
+    u64 m_gpu_fault_page{};
+    u32 m_gpu_fault_repeats{};
 };
 
 } // namespace Core::Hypervisor
