@@ -305,7 +305,7 @@ bool AddressSpace::WaitReadBarrier(VAddr va) {
     if (!barrier_counts.contains(page)) {
         return false;
     }
-    if (!barrier_cv.wait_for(lk, std::chrono::milliseconds(250),
+    if (!barrier_cv.wait_for(lk, std::chrono::seconds(2),
                              [&] { return !barrier_counts.contains(page); })) {
         LOG_WARNING(Core_ARM, "Read barrier on {:#x} timed out, dropping it", page);
         barrier_counts.erase(page);
