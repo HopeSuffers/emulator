@@ -74,6 +74,7 @@ private:
         u64 sysreg{};
         u64 abort{};
         u64 canceled{};
+        u64 watchdog{};
         u64 flush{};
         u64 read_fault{};
         u64 barrier{};

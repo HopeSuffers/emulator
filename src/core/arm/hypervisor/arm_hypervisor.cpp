@@ -4,9 +4,12 @@
 #include <algorithm>
 #include <cstdlib>
 #include <cstring>
+#include <mutex>
+#include <unordered_set>
 
 #include <Hypervisor/Hypervisor.h>
 #include <libkern/OSCacheControl.h>
+#include <mach/mach_time.h>
 
 #include "common/assert.h"
 #include "common/logging.h"
@@ -39,6 +42,28 @@ constexpr u32 EcDataAbortLower = 0x24;
 constexpr u32 EcBrk64 = 0x3C;
 
 const bool StatsEnabled = std::getenv("CITRON_HV_STATS") != nullptr;
+
+u64 WatchdogTicks() {
+    static const u64 ticks = [] {
+        mach_timebase_info_data_t timebase{};
+        mach_timebase_info(&timebase);
+        return 16'000'000ULL * timebase.denom / timebase.numer;
+    }();
+    return ticks;
+}
+
+void ArmWatchdog(hv_vcpu_t id) {
+    hv_vcpu_set_sys_reg(id, HV_SYS_REG_CNTV_CVAL_EL0, mach_absolute_time() + WatchdogTicks());
+    hv_vcpu_set_sys_reg(id, HV_SYS_REG_CNTV_CTL_EL0, 1);
+    hv_vcpu_set_vtimer_mask(id, false);
+}
+
+bool FirstUnhandledSystemRegister(u32 key) {
+    static std::mutex mutex;
+    static std::unordered_set<u32> seen;
+    std::scoped_lock lk{mutex};
+    return seen.insert(key).second;
+}
 
 u32 ExceptionClass(u64 esr) {
     return static_cast<u32>((esr >> 26) & 0x3F);
@@ -179,9 +204,11 @@ void ArmHypervisor::CountExit(u64 ExitStats::* counter) {
     if (m_stats_start.time_since_epoch().count() != 0) {
         const auto rate = [seconds](u64 count) { return static_cast<double>(count) / seconds; };
         LOG_INFO(Core_ARM, "HV core {} exits/s: svc {:.0f}, sysreg {:.0f}, abort {:.0f}, "
-                           "canceled {:.0f}, flush {:.0f}, read faults {:.0f}, barrier {:.0f}",
+                           "canceled {:.0f}, watchdog {:.0f}, flush {:.0f}, read faults {:.0f}, "
+                           "barrier {:.0f}",
                  m_core_index, rate(m_stats.svc), rate(m_stats.sysreg), rate(m_stats.abort),
-                 rate(m_stats.canceled), rate(m_stats.flush), rate(m_stats.read_fault),
+                 rate(m_stats.canceled), rate(m_stats.watchdog), rate(m_stats.flush),
+                 rate(m_stats.read_fault),
                  rate(m_stats.barrier));
     }
     m_stats = {};
@@ -222,9 +249,10 @@ void ArmHypervisor::HandleSystemRegister(Vcpu& vcpu, u64 esr) {
         value = CounterFrequency;
     } else if (is_read && (sysreg == CntPct || sysreg == CntVct)) {
         value = m_system.CoreTiming().GetClockTicks();
-    } else {
-        LOG_WARNING(Core_ARM, "Unhandled system register {} {:#x} (esr={:#x})",
-                    is_read ? "read" : "write", sysreg, esr);
+    } else if (FirstUnhandledSystemRegister(sysreg | (is_read ? 1U : 0U))) {
+        LOG_WARNING(Core_ARM, "Unhandled system register {} {:#x} (esr={:#x}), {}",
+                    is_read ? "read" : "write", sysreg, esr,
+                    is_read ? "returning 0" : "ignoring it");
     }
     if (is_read && rt != 31) {
         vcpu.SetReg(XReg(rt), value);
@@ -288,14 +316,22 @@ HaltReason ArmHypervisor::RunThread(Kernel::KThread* thread) {
     }
 
     LoadState(vcpu, false);
+    ArmWatchdog(vcpu.id);
 
     HaltReason hr{};
     while (true) {
         Check(hv_vcpu_run(vcpu.id), "hv_vcpu_run");
         const hv_vcpu_exit_t& exit = *vcpu.exit;
 
-        if (exit.reason == HV_EXIT_REASON_CANCELED) {
-            CountExit(&ExitStats::canceled);
+        if (exit.reason == HV_EXIT_REASON_VTIMER_ACTIVATED) {
+            CountExit(&ExitStats::watchdog);
+            ArmWatchdog(vcpu.id);
+        }
+        if (exit.reason == HV_EXIT_REASON_CANCELED ||
+            exit.reason == HV_EXIT_REASON_VTIMER_ACTIVATED) {
+            if (exit.reason == HV_EXIT_REASON_CANCELED) {
+                CountExit(&ExitStats::canceled);
+            }
             const u64 cpsr = vcpu.Reg(HV_REG_CPSR);
             const u64 pc = vcpu.Reg(HV_REG_PC);
             if ((cpsr & 0xF) == 0) {
