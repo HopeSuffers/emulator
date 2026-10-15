@@ -1331,6 +1331,11 @@ void KProcess::InitializeInterfaces() {
 }
 
 bool KProcess::InsertWatchpoint(KProcessAddress addr, u64 size, DebugWatchpointType type) {
+    if (GetMemory().GetMappingObserver() != nullptr) {
+        LOG_WARNING(Kernel, "Watchpoints are not supported with the hypervisor CPU backend");
+        return false;
+    }
+
     const auto watch{std::find_if(m_watchpoints.begin(), m_watchpoints.end(), [&](const auto& wp) {
         return wp.type == DebugWatchpointType::None;
     })};
