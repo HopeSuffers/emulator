@@ -514,7 +514,7 @@ public:
 
     void SetGPUDirtyManagers(std::span<Core::GPUDirtyMemoryManager> managers);
 
-    bool InvalidateNCE(Common::ProcessAddress vaddr, size_t size);
+    bool HandleGuestAccessFault(Common::ProcessAddress vaddr, size_t size);
 
     void FlushNCE(Common::ProcessAddress vaddr, size_t size);
 

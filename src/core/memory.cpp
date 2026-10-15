@@ -1150,14 +1150,14 @@ void Memory::MarkRegionDebug(Common::ProcessAddress vaddr, u64 size, bool debug)
     impl->MarkRegionDebug(GetInteger(vaddr), size, debug);
 }
 
-bool Memory::InvalidateNCE(Common::ProcessAddress vaddr, size_t size) {
+bool Memory::HandleGuestAccessFault(Common::ProcessAddress vaddr, size_t size) {
     [[maybe_unused]] bool mapped = true;
     [[maybe_unused]] bool rasterizer = false;
 
     u8* const ptr = impl->GetPointerImpl(
         GetInteger(vaddr),
         [&] {
-            LOG_DEBUG(HW_Memory, "Unmapped InvalidateNCE for {} bytes @ {:#x}", size,
+            LOG_DEBUG(HW_Memory, "Unmapped HandleGuestAccessFault for {} bytes @ {:#x}", size,
                       GetInteger(vaddr));
             mapped = false;
         },

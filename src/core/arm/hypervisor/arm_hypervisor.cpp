@@ -293,7 +293,7 @@ ArmHypervisor::AbortAction ArmHypervisor::HandleDataAbort(u64 far, u64 elr, u64 
         m_fault_repeats = 0;
     }
     if (m_address_space.IsTracked(page) &&
-        m_process->GetMemory().InvalidateNCE(page, Memory::CITRON_PAGESIZE)) {
+        m_process->GetMemory().HandleGuestAccessFault(page, Memory::CITRON_PAGESIZE)) {
         return AbortAction::Retry;
     }
     if (m_address_space.Permits(page, is_write)) {
