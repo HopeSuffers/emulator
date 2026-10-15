@@ -2128,14 +2128,17 @@ ImageView::ImageView(TextureCacheRuntime& runtime, const VideoCommon::ImageViewI
         .components = stored_components,
         .subresourceRange = MakeSubresourceRange(aspect_mask, info.range),
     };
+    {
+        auto& range = create_info.subresourceRange;
+        const u32 levels = PhysicalMipLevels(image.info);
+        range.baseMipLevel = std::min(range.baseMipLevel, levels - 1);
+        range.levelCount = std::min(range.levelCount, levels - range.baseMipLevel);
+    }
     if (image.info.type != VideoCommon::ImageType::e3D) {
         auto& range = create_info.subresourceRange;
         const u32 layers = static_cast<u32>(image.info.resources.layers);
-        const u32 levels = static_cast<u32>(image.info.resources.levels);
         range.baseArrayLayer = std::min(range.baseArrayLayer, layers - 1);
         range.layerCount = std::min(range.layerCount, layers - range.baseArrayLayer);
-        range.baseMipLevel = std::min(range.baseMipLevel, levels - 1);
-        range.levelCount = std::min(range.levelCount, levels - range.baseMipLevel);
         if ((info.type == VideoCommon::ImageViewType::Cube ||
              info.type == VideoCommon::ImageViewType::CubeArray) &&
             range.layerCount >= 6) {
