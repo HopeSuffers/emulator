@@ -108,6 +108,9 @@ struct Profile {
     /// Maxwell and earlier nVidia architectures have broken robust support
     bool has_broken_robust{};
 
+    /// Sampling with NaN coordinates must read texel zero like the guest GPU
+    bool sanitize_nan_texture_coords{};
+
     u64 min_ssbo_alignment{};
 
     u32 max_user_clip_distances{};

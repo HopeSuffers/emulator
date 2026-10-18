@@ -482,6 +482,7 @@ PipelineCache::PipelineCache(Tegra::MaxwellDeviceMemoryManager& device_memory_,
             driver_id == VK_DRIVER_ID_QUALCOMM_PROPRIETARY,
         .has_broken_robust =
             device.IsNvidia() && device.GetNvidiaArch() <= NvidiaArchitecture::Arch_Pascal,
+        .sanitize_nan_texture_coords = driver_id == VK_DRIVER_ID_MOLTENVK,
         .min_ssbo_alignment = device.GetStorageBufferAlignment(),
         .max_user_clip_distances = device.GetMaxUserClipDistances(),
     };

@@ -547,8 +547,34 @@ Id EmitBoundImageWrite(EmitContext&) {
     throw LogicError("Unreachable instruction");
 }
 
+Id SanitizeCoords(EmitContext& ctx, IR::Inst* inst, Id coords) {
+    if (!ctx.profile.sanitize_nan_texture_coords) {
+        return coords;
+    }
+    size_t count{1};
+    switch (inst->Arg(1).Type()) {
+    case IR::Type::F32x2:
+        count = 2;
+        break;
+    case IR::Type::F32x3:
+        count = 3;
+        break;
+    case IR::Type::F32x4:
+        count = 4;
+        break;
+    case IR::Type::F32:
+        break;
+    default:
+        return coords;
+    }
+    const Id type{ctx.F32[count]};
+    const Id bool_type{count == 1 ? ctx.U1 : ctx.TypeVector(ctx.U1, static_cast<int>(count))};
+    return ctx.OpSelect(type, ctx.OpIsNan(bool_type, coords), ctx.ConstantNull(type), coords);
+}
+
 Id EmitImageSampleImplicitLod(EmitContext& ctx, IR::Inst* inst, const IR::Value& index, Id coords,
                               Id bias_lc, const IR::Value& offset) {
+    coords = SanitizeCoords(ctx, inst, coords);
     const auto info{inst->Flags<IR::TextureInstInfo>()};
     const bool is_integer{IsTextureInteger(ctx, info)};
     const Id result_type{TextureResultType(ctx, info)};
@@ -574,6 +600,7 @@ Id EmitImageSampleImplicitLod(EmitContext& ctx, IR::Inst* inst, const IR::Value&
 
 Id EmitImageSampleExplicitLod(EmitContext& ctx, IR::Inst* inst, const IR::Value& index, Id coords,
                               Id lod, const IR::Value& offset) {
+    coords = SanitizeCoords(ctx, inst, coords);
     const auto info{inst->Flags<IR::TextureInstInfo>()};
     const bool is_integer{IsTextureInteger(ctx, info)};
     const Id result_type{TextureResultType(ctx, info)};
@@ -586,6 +613,7 @@ Id EmitImageSampleExplicitLod(EmitContext& ctx, IR::Inst* inst, const IR::Value&
 
 Id EmitImageSampleDrefImplicitLod(EmitContext& ctx, IR::Inst* inst, const IR::Value& index,
                                   Id coords, Id dref, Id bias_lc, const IR::Value& offset) {
+    coords = SanitizeCoords(ctx, inst, coords);
     const auto info{inst->Flags<IR::TextureInstInfo>()};
     if (ctx.stage == Stage::Fragment) {
         const ImageOperands operands(ctx, info.has_bias != 0, false, info.has_lod_clamp != 0,
@@ -607,6 +635,7 @@ Id EmitImageSampleDrefImplicitLod(EmitContext& ctx, IR::Inst* inst, const IR::Va
 
 Id EmitImageSampleDrefExplicitLod(EmitContext& ctx, IR::Inst* inst, const IR::Value& index,
                                   Id coords, Id dref, Id lod, const IR::Value& offset) {
+    coords = SanitizeCoords(ctx, inst, coords);
     const auto info{inst->Flags<IR::TextureInstInfo>()};
     const ImageOperands operands(ctx, false, true, false, lod, offset);
     return Emit(&EmitContext::OpImageSparseSampleDrefExplicitLod,
@@ -616,6 +645,7 @@ Id EmitImageSampleDrefExplicitLod(EmitContext& ctx, IR::Inst* inst, const IR::Va
 
 Id EmitImageGather(EmitContext& ctx, IR::Inst* inst, const IR::Value& index, Id coords,
                    const IR::Value& offset, const IR::Value& offset2) {
+    coords = SanitizeCoords(ctx, inst, coords);
     const auto info{inst->Flags<IR::TextureInstInfo>()};
     const bool is_integer{IsTextureInteger(ctx, info)};
     const Id result_type{TextureResultType(ctx, info)};
@@ -632,6 +662,7 @@ Id EmitImageGather(EmitContext& ctx, IR::Inst* inst, const IR::Value& index, Id 
 
 Id EmitImageGatherDref(EmitContext& ctx, IR::Inst* inst, const IR::Value& index, Id coords,
                        const IR::Value& offset, const IR::Value& offset2, Id dref) {
+    coords = SanitizeCoords(ctx, inst, coords);
     const auto info{inst->Flags<IR::TextureInstInfo>()};
     const bool is_integer{IsTextureInteger(ctx, info)};
     const Id result_type{TextureResultType(ctx, info)};
