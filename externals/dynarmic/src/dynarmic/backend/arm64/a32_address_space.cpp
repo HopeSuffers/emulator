@@ -80,11 +80,19 @@ static void* EmitExclusiveReadCallTrampoline(oaknut::CodeGenerator& code, const 
 
     oaknut::Label l_addr, l_this;
 
-    auto fn = [](const A32::UserConfig& conf, A32::VAddr vaddr) -> T {
+    auto fn_locked = [](const A32::UserConfig& conf, A32::VAddr vaddr) -> T {
         return conf.global_monitor->ReadAndMark<T>(conf.processor_id, vaddr, [&]() -> T {
             return (conf.callbacks->*callback)(vaddr);
         });
     };
+
+    auto fn_unlocked = [](const A32::UserConfig& conf, A32::VAddr vaddr) -> T {
+        return conf.global_monitor->ReadAndMarkUnlocked<T>(conf.processor_id, vaddr, [&]() -> T {
+            return (conf.callbacks->*callback)(vaddr);
+        });
+    };
+
+    const auto fn = conf.HasOptimization(OptimizationFlag::Unsafe_IgnoreGlobalMonitor) ? Common::FptrCast(fn_unlocked) : Common::FptrCast(fn_locked);
 
     void* target = code.xptr<void*>();
     code.LDR(X0, l_this);
@@ -95,7 +103,7 @@ static void* EmitExclusiveReadCallTrampoline(oaknut::CodeGenerator& code, const 
     code.l(l_this);
     code.dx(std::bit_cast<u64>(&conf));
     code.l(l_addr);
-    code.dx(std::bit_cast<u64>(Common::FptrCast(fn)));
+    code.dx(std::bit_cast<u64>(fn));
 
     return target;
 }
@@ -135,7 +143,7 @@ static void* EmitExclusiveWriteCallTrampoline(oaknut::CodeGenerator& code, const
 
     oaknut::Label l_addr, l_this;
 
-    auto fn = [](const A32::UserConfig& conf, A32::VAddr vaddr, T value) -> u32 {
+    auto fn_locked = [](const A32::UserConfig& conf, A32::VAddr vaddr, T value) -> u32 {
         return conf.global_monitor->DoExclusiveOperation<T>(conf.processor_id, vaddr,
                                                             [&](T expected) -> bool {
                                                                 return (conf.callbacks->*callback)(vaddr, value, expected);
@@ -143,6 +151,17 @@ static void* EmitExclusiveWriteCallTrampoline(oaknut::CodeGenerator& code, const
                  ? 0
                  : 1;
     };
+
+    auto fn_unlocked = [](const A32::UserConfig& conf, A32::VAddr vaddr, T value) -> u32 {
+        return conf.global_monitor->DoExclusiveOperationUnlocked<T>(conf.processor_id, vaddr,
+                                                            [&](T expected) -> bool {
+                                                                return (conf.callbacks->*callback)(vaddr, value, expected);
+                                                            })
+                 ? 0
+                 : 1;
+    };
+
+    const auto fn = conf.HasOptimization(OptimizationFlag::Unsafe_IgnoreGlobalMonitor) ? Common::FptrCast(fn_unlocked) : Common::FptrCast(fn_locked);
 
     void* target = code.xptr<void*>();
     code.LDR(X0, l_this);
@@ -153,7 +172,7 @@ static void* EmitExclusiveWriteCallTrampoline(oaknut::CodeGenerator& code, const
     code.l(l_this);
     code.dx(std::bit_cast<u64>(&conf));
     code.l(l_addr);
-    code.dx(std::bit_cast<u64>(Common::FptrCast(fn)));
+    code.dx(std::bit_cast<u64>(fn));
 
     return target;
 }

@@ -64,6 +64,27 @@ public:
         return result;
     }
 
+    template<typename T, typename Function>
+    T ReadAndMarkUnlocked(size_t processor_id, VAddr address, Function op) {
+        static_assert(std::is_trivially_copyable_v<T>);
+        const T value = op();
+        std::memcpy(exclusive_values[processor_id].data(), &value, sizeof(T));
+        exclusive_addresses[processor_id] = address & RESERVATION_GRANULE_MASK;
+        return value;
+    }
+
+    template<typename T, typename Function>
+        requires std::is_trivially_copyable_v<T>
+    bool DoExclusiveOperationUnlocked(size_t processor_id, VAddr address, Function op) {
+        if (exclusive_addresses[processor_id] != (address & RESERVATION_GRANULE_MASK)) {
+            return false;
+        }
+        exclusive_addresses[processor_id] = INVALID_EXCLUSIVE_ADDRESS;
+        T saved_value;
+        std::memcpy(&saved_value, exclusive_values[processor_id].data(), sizeof(T));
+        return op(saved_value);
+    }
+
     /// Unmark everything.
     void Clear();
     /// Unmark processor id
