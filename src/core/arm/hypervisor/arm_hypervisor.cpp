@@ -29,7 +29,7 @@ namespace {
 constexpr u64 CpsrEl1h = 0x3C5;
 constexpr u64 Mair = 0xFF;
 constexpr u64 Tcr = 0x00000011B5193519ULL;
-constexpr u64 Sctlr = 0x34D5D925;
+constexpr u64 Sctlr = 0x34D55925;
 constexpr u64 CpacrFpen = 3ULL << 20;
 constexpr u64 CounterFrequency = 19'200'000;
 
@@ -243,10 +243,13 @@ void ArmHypervisor::HandleSystemRegister(Vcpu& vcpu, u64 esr) {
     constexpr u32 CntFrq = (3 << 20) | (0 << 17) | (3 << 14) | (14 << 10) | (0 << 1);
     constexpr u32 CntPct = (3 << 20) | (1 << 17) | (3 << 14) | (14 << 10) | (0 << 1);
     constexpr u32 CntVct = (3 << 20) | (2 << 17) | (3 << 14) | (14 << 10) | (0 << 1);
+    constexpr u32 Ctr = (3 << 20) | (1 << 17) | (3 << 14) | (0 << 10) | (0 << 1);
 
     u64 value = 0;
     if (is_read && sysreg == CntFrq) {
         value = CounterFrequency;
+    } else if (is_read && sysreg == Ctr) {
+        value = 0x8444C004;
     } else if (is_read && (sysreg == CntPct || sysreg == CntVct)) {
         value = m_system.CoreTiming().GetClockTicks();
     } else if (FirstUnhandledSystemRegister(sysreg | (is_read ? 1U : 0U))) {
@@ -347,7 +350,7 @@ HaltReason ArmHypervisor::RunThread(Kernel::KThread* thread) {
                 continue;
             }
             if (pc >= ResumeStub && pc < ResumeStubEnd && m_interrupt.exchange(false)) {
-                if (pc != ResumeStub) {
+                if (pc >= ResumeFlushStub) {
                     m_icache_flush.store(true);
                 }
                 SaveState(vcpu, vcpu.SysReg(HV_SYS_REG_ELR_EL1),

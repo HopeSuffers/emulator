@@ -149,9 +149,12 @@ u64 KernelTtbr1() {
             page[vector * 0x20] = Hvc;
             page[vector * 0x20 + 1] = Eret;
         }
+        constexpr u32 Clrex = 0xD503305F;
         const u32 resume_flush[] = {
-            Eret,       // +0x1000
-            0xD5033A9F, // +0x1004 dsb ishst
+            Clrex,      // +0x1000
+            Eret,
+            Clrex,      // +0x1008
+            0xD5033A9F, // dsb ishst
             0xD508831F, // tlbi vmalle1is
             0xD508711F, // ic ialluis
             0xD5033B9F, // dsb ish
