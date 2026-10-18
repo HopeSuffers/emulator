@@ -3079,6 +3079,9 @@ public:
     /// Reads a register value located at the input method address
     u32 GetRegisterValue(u32 method) const;
 
+    /// Returns true when a render target writes nothing and aliases an earlier one
+    bool IsRedundantRenderTarget(std::size_t index) const;
+
     /// Write the value to the register identified by method.
     void CallMethod(u32 method, u32 method_argument, bool is_last_call) override;
 

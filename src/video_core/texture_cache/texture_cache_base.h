@@ -463,6 +463,7 @@ public:
 
     bool has_deleted_images = false;
     bool is_rescaling = false;
+    u8 last_redundant_rts = 0;
     u64 total_used_memory = 0; // Bytes owned by this cache.
     CacheMemoryPressure memory_pressure;
 

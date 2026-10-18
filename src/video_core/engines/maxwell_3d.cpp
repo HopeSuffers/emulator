@@ -759,6 +759,20 @@ Texture::TSCEntry Maxwell3D::GetTSCEntry(u32 tsc_index) const {
     return tsc_entry;
 }
 
+bool Maxwell3D::IsRedundantRenderTarget(std::size_t index) const {
+    const auto& rt = regs.rt[index];
+    const u32 mask = regs.color_mask_common ? regs.color_mask[0].raw : regs.color_mask[index].raw;
+    if ((mask & 0x1111) != 0 || rt.Address() == 0 || rt.format == Tegra::RenderTargetFormat::NONE) {
+        return false;
+    }
+    for (std::size_t i = 0; i < index; ++i) {
+        if (regs.rt[i].Address() == rt.Address() && regs.rt[i].format == rt.format) {
+            return true;
+        }
+    }
+    return false;
+}
+
 u32 Maxwell3D::GetRegisterValue(u32 method) const {
     assert(method < Regs::NUM_REGS && "Invalid Maxwell3D register");
     return regs.reg_array[method];

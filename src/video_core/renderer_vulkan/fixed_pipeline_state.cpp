@@ -67,7 +67,9 @@ void FixedPipelineState::Refresh(Tegra::Engines::Maxwell3D& maxwell3d, DynamicFe
     app_stage.Assign(maxwell3d.engine_state);
 
     for (size_t i = 0; i < regs.rt.size(); ++i) {
-        color_formats[i] = static_cast<u8>(regs.rt[i].format);
+        color_formats[i] = static_cast<u8>(maxwell3d.IsRedundantRenderTarget(i)
+                                               ? Tegra::RenderTargetFormat::NONE
+                                               : regs.rt[i].format);
     }
     alpha_test_ref = std::bit_cast<u32>(regs.alpha_test_ref);
     point_size = std::bit_cast<u32>(regs.point_size);

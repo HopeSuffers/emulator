@@ -473,6 +473,20 @@ template <class P>
 void TextureCache<P>::UpdateRenderTargets(bool is_clear) {
     using namespace VideoCommon::Dirty;
     auto& flags = maxwell3d->dirty.flags;
+    u8 redundant_rts = 0;
+    for (size_t index = 1; index < NUM_RT; ++index) {
+        redundant_rts |= static_cast<u8>(maxwell3d->IsRedundantRenderTarget(index) ? 1U << index : 0U);
+    }
+    if (redundant_rts != last_redundant_rts) {
+        const u8 changed = redundant_rts ^ last_redundant_rts;
+        last_redundant_rts = redundant_rts;
+        flags[Dirty::RenderTargets] = true;
+        for (size_t index = 0; index < NUM_RT; ++index) {
+            if (changed & (1U << index)) {
+                flags[Dirty::ColorBuffer0 + index] = true;
+            }
+        }
+    }
     if (!flags[Dirty::RenderTargets]) {
         for (size_t index = 0; index < NUM_RT; ++index) {
             ImageViewId& color_buffer_id = render_targets.color_buffer_ids[index];
@@ -1920,7 +1934,7 @@ ImageViewId TextureCache<P>::FindColorBuffer(size_t index) {
     if (gpu_addr == 0) {
         return ImageViewId{};
     }
-    if (rt.format == Tegra::RenderTargetFormat::NONE) {
+    if (rt.format == Tegra::RenderTargetFormat::NONE || maxwell3d->IsRedundantRenderTarget(index)) {
         return ImageViewId{};
     }
     const ImageInfo info(regs.rt[index], regs.anti_alias_samples_mode);
