@@ -326,23 +326,19 @@ void AddressSpace::MarkReadBarrier(VAddr va, u64 size, bool enable) {
     }
 }
 
-bool AddressSpace::WaitReadBarrier(VAddr va) {
+bool AddressSpace::WaitReadBarrier(VAddr va, const std::atomic<bool>& interrupt) {
     const VAddr page = va & ~(PageSize - 1);
     std::unique_lock lk{mutex};
     if (!barrier_counts.contains(page)) {
         return false;
     }
-    if (!barrier_cv.wait_for(lk, std::chrono::seconds(2),
-                             [&] { return !barrier_counts.contains(page); })) {
-        LOG_WARNING(Core_ARM, "Read barrier on {:#x} timed out, dropping it", page);
-        barrier_counts.erase(page);
-        if (u64* leaf = GetLeaf(page, false); leaf && (Load(leaf) & SwPresent)) {
-            const u64 old_leaf = Load(leaf);
-            Store(leaf, MakeLeaf(old_leaf & AddressMask, PermOf(old_leaf),
-                                 old_leaf & (SwTracked | SwGpuModified)));
-        }
-    }
+    barrier_cv.wait(lk, [&] { return !barrier_counts.contains(page) || interrupt.load(); });
     return true;
+}
+
+void AddressSpace::WakeBarrierWaiters() {
+    std::scoped_lock lk{mutex};
+    barrier_cv.notify_all();
 }
 
 void AddressSpace::MarkGpuModified(VAddr va, u64 size) {

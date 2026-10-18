@@ -40,7 +40,8 @@ public:
         return true;
     }
 
-    bool WaitReadBarrier(VAddr va);
+    bool WaitReadBarrier(VAddr va, const std::atomic<bool>& interrupt);
+    void WakeBarrierWaiters();
 
     std::optional<u64> GpuModifiedEpoch(VAddr va);
     bool ClearGpuModified(VAddr va, u64 epoch, bool force);

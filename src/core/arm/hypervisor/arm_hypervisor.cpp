@@ -271,7 +271,7 @@ ArmHypervisor::AbortAction ArmHypervisor::HandleDataAbort(u64 far, u64 elr, u64 
         }
         return AbortAction::Retry;
     }
-    if (m_address_space.WaitReadBarrier(page)) {
+    if (m_address_space.WaitReadBarrier(page, m_interrupt)) {
         CountExit(&ExitStats::barrier);
         return AbortAction::Retry;
     }
@@ -475,6 +475,7 @@ u32 ArmHypervisor::GetSvcNumber() const {
 
 void ArmHypervisor::SignalInterrupt(Kernel::KThread* thread) {
     m_interrupt.store(true);
+    m_address_space.WakeBarrierWaiters();
     if (const u64 running = m_address_space.RunningVcpu(m_core_index); running != 0) {
         hv_vcpu_t id = running - 1;
         hv_vcpus_exit(&id, 1);
