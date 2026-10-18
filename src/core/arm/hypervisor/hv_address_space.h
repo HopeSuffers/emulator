@@ -70,8 +70,10 @@ private:
     void Update(u64* leaf, u64 new_leaf, bool& flush);
     void RequestFlush();
     void Verify(VAddr va, u64 size);
+    bool OrderExclusives(PAddr pa);
 
     const Common::PageTable& page_table;
+    u8* dram_backing{};
     Table root;
     std::vector<Table> tables;
     std::mutex mutex;

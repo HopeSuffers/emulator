@@ -117,7 +117,8 @@ AddressSpace::AddressSpace(Core::System& system, const Common::PageTable& page_t
                                                             nullptr} {
     const size_t dram_size =
         Kernel::Board::Nintendo::Nx::KSystemControl::Init::GetIntendedMemorySize();
-    const bool mapped = MapDram(system.DeviceMemory().buffer.BackingBasePointer(), dram_size);
+    dram_backing = system.DeviceMemory().buffer.BackingBasePointer();
+    const bool mapped = MapDram(dram_backing, dram_size);
     if (!mapped) {
         LOG_CRITICAL(Core_ARM, "Guest DRAM could not be mapped into the hypervisor VM");
         std::abort();
@@ -173,11 +174,34 @@ void AddressSpace::RequestFlush() {
     }
 }
 
+// Some games use unordered exclusives where ordering is required, which Apple cores expose.
+bool AddressSpace::OrderExclusives(PAddr pa) {
+    auto* const code = reinterpret_cast<u32*>(dram_backing + (pa - DramMemoryMap::Base));
+    bool patched = false;
+    for (size_t i = 0; i < PageSize / sizeof(u32); ++i) {
+        const u32 inst = code[i];
+        if ((inst & 0x3F808000U) != 0x08000000U) {
+            continue;
+        }
+        const bool is_pair = (inst & (1U << 21)) != 0;
+        const bool is_load = (inst & (1U << 22)) != 0;
+        if ((is_load && ((inst >> 16) & 0x1F) != 31) || (!is_pair && ((inst >> 10) & 0x1F) != 31)) {
+            continue;
+        }
+        code[i] = inst | (1U << 15);
+        patched = true;
+    }
+    return patched;
+}
+
 void AddressSpace::Map(VAddr va, PAddr pa, u64 size, MemoryPermission perm) {
     bool flush = false;
     {
         std::scoped_lock lk{mutex};
         for (u64 offset = 0; offset < size; offset += PageSize) {
+            if (Has(perm, MemoryPermission::Execute) && OrderExclusives(pa + offset)) {
+                flush = true;
+            }
             Update(GetLeaf(va + offset, true), MakeLeaf(pa + offset, perm), flush);
             gpu_modified_epochs.erase(va + offset);
         }
@@ -221,6 +245,9 @@ void AddressSpace::Protect(VAddr va, u64 size, MemoryPermission perm) {
             }
             const u64 old_leaf = Load(leaf);
             if (old_leaf & SwPresent) {
+                if (Has(perm, MemoryPermission::Execute) && OrderExclusives(old_leaf & AddressMask)) {
+                    flush = true;
+                }
                 Update(leaf, MakeLeaf(old_leaf & AddressMask, perm, old_leaf & SwState), flush);
             }
         }
