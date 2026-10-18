@@ -1943,7 +1943,8 @@ ImageViewId TextureCache<P>::FindDepthBuffer() {
 
 template <class P>
 ImageId TextureCache<P>::FindPaddedRenderTarget(const ImageInfo& info, GPUVAddr gpu_addr) {
-    if (info.type == ImageType::Linear) {
+    if (info.type == ImageType::Linear ||
+        VideoCore::Surface::GetFormatType(info.format) != VideoCore::Surface::SurfaceType::ColorTexture) {
         return ImageId{};
     }
     const std::optional<DAddr> cpu_addr = gpu_memory->GpuToCpuAddress(gpu_addr);
