@@ -83,6 +83,7 @@ struct Vcpu {
     hv_vcpu_exit_t* exit{};
     u64 ttbr0{~0ULL};
     bool created{};
+    ArmHypervisor* simd_owner{};
 
     ~Vcpu() {
         if (created) {
@@ -114,6 +115,8 @@ struct Vcpu {
 namespace {
 
 thread_local Vcpu t_vcpu;
+std::mutex g_live_mutex;
+std::unordered_set<const ArmHypervisor*> g_live_interfaces;
 
 Vcpu& CurrentVcpu() {
     if (!t_vcpu.created) {
@@ -143,9 +146,15 @@ hv_simd_fp_reg_t QReg(size_t index) {
 ArmHypervisor::ArmHypervisor(System& system, Kernel::KProcess* process,
                              AddressSpace& address_space, std::size_t core_index)
     : ArmInterface{true}, m_system{system}, m_process{process}, m_address_space{address_space},
-      m_core_index{core_index} {}
+      m_core_index{core_index} {
+    std::scoped_lock lk{g_live_mutex};
+    g_live_interfaces.insert(this);
+}
 
-ArmHypervisor::~ArmHypervisor() = default;
+ArmHypervisor::~ArmHypervisor() {
+    std::scoped_lock lk{g_live_mutex};
+    g_live_interfaces.erase(this);
+}
 
 void ArmHypervisor::LoadState(Vcpu& vcpu, bool flush) {
     if (vcpu.ttbr0 != m_address_space.RootIpa()) {
@@ -159,10 +168,20 @@ void ArmHypervisor::LoadState(Vcpu& vcpu, bool flush) {
     vcpu.SetReg(HV_REG_FP, m_ctx.fp);
     vcpu.SetReg(HV_REG_LR, m_ctx.lr);
     vcpu.SetSysReg(HV_SYS_REG_SP_EL0, m_ctx.sp);
-    for (size_t i = 0; i < 32; i++) {
-        hv_simd_fp_uchar16_t value;
-        std::memcpy(&value, &m_ctx.v[i], sizeof(value));
-        hv_vcpu_set_simd_fp_reg(vcpu.id, QReg(i), value);
+    if (vcpu.simd_owner != this || !m_simd_live) {
+        if (vcpu.simd_owner != nullptr && vcpu.simd_owner != this) {
+            std::scoped_lock lk{g_live_mutex};
+            if (g_live_interfaces.contains(vcpu.simd_owner)) {
+                vcpu.simd_owner->PullSimd(vcpu);
+            }
+        }
+        for (size_t i = 0; i < 32; i++) {
+            hv_simd_fp_uchar16_t value;
+            std::memcpy(&value, &m_ctx.v[i], sizeof(value));
+            hv_vcpu_set_simd_fp_reg(vcpu.id, QReg(i), value);
+        }
+        vcpu.simd_owner = this;
+        m_simd_live = false;
     }
     vcpu.SetReg(HV_REG_FPCR, m_ctx.fpcr);
     vcpu.SetReg(HV_REG_FPSR, m_ctx.fpsr);
@@ -181,14 +200,23 @@ void ArmHypervisor::SaveState(Vcpu& vcpu, u64 pc, u64 pstate) {
     m_ctx.sp = vcpu.SysReg(HV_SYS_REG_SP_EL0);
     m_ctx.pc = pc;
     m_ctx.pstate = static_cast<u32>(pstate & 0xF000'0000);
+    vcpu.simd_owner = this;
+    m_simd_live = true;
+    m_ctx.fpcr = static_cast<u32>(vcpu.Reg(HV_REG_FPCR));
+    m_ctx.fpsr = static_cast<u32>(vcpu.Reg(HV_REG_FPSR));
+    m_ctx.tpidr = vcpu.SysReg(HV_SYS_REG_TPIDR_EL0);
+}
+
+void ArmHypervisor::PullSimd(Vcpu& vcpu) {
+    if (!m_simd_live) {
+        return;
+    }
     for (size_t i = 0; i < 32; i++) {
         hv_simd_fp_uchar16_t value;
         hv_vcpu_get_simd_fp_reg(vcpu.id, QReg(i), &value);
         std::memcpy(&m_ctx.v[i], &value, sizeof(value));
     }
-    m_ctx.fpcr = static_cast<u32>(vcpu.Reg(HV_REG_FPCR));
-    m_ctx.fpsr = static_cast<u32>(vcpu.Reg(HV_REG_FPSR));
-    m_ctx.tpidr = vcpu.SysReg(HV_SYS_REG_TPIDR_EL0);
+    m_simd_live = false;
 }
 
 void ArmHypervisor::CountExit(u64 ExitStats::* counter) {
@@ -449,11 +477,19 @@ HaltReason ArmHypervisor::StepThread(Kernel::KThread* thread) {
 }
 
 void ArmHypervisor::GetContext(Kernel::Svc::ThreadContext& ctx) const {
+    if (m_simd_live) {
+        if (t_vcpu.created && t_vcpu.simd_owner == this) {
+            const_cast<ArmHypervisor*>(this)->PullSimd(t_vcpu);
+        } else {
+            LOG_ERROR(Core_ARM, "Thread context read off the owning vCPU thread");
+        }
+    }
     ctx = m_ctx;
 }
 
 void ArmHypervisor::SetContext(const Kernel::Svc::ThreadContext& ctx) {
     m_ctx = ctx;
+    m_simd_live = false;
 }
 
 void ArmHypervisor::SetTpidrroEl0(u64 value) {

@@ -52,6 +52,7 @@ protected:
 private:
     void LoadState(Vcpu& vcpu, bool flush);
     void SaveState(Vcpu& vcpu, u64 pc, u64 pstate);
+    void PullSimd(Vcpu& vcpu);
     void HandleSystemRegister(Vcpu& vcpu, u64 esr);
     enum class AbortAction { Retry, Skip, Halt };
     AbortAction HandleDataAbort(u64 far, u64 elr, u64 esr);
@@ -63,7 +64,8 @@ private:
     AddressSpace& m_address_space;
     std::size_t m_core_index;
 
-    Kernel::Svc::ThreadContext m_ctx{};
+    mutable Kernel::Svc::ThreadContext m_ctx{};
+    bool m_simd_live{};
     u64 m_tpidrro_el0{};
     u32 m_svc{};
 
